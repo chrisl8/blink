@@ -103,3 +103,23 @@ extension KBKey {
     }
   }
 }
+
+extension KBKey: Codable {
+  enum CodingKeys: CodingKey {
+    case shape
+    case traits
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let shape = try container.decode(KBKeyShape.self, forKey: .shape)
+    let traits = try container.decode(KBTraits.self, forKey: .traits)
+    self.init(shape, traits: traits)
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(shape, forKey: .shape)
+    try container.encode(_traits, forKey: .traits)
+  }
+}

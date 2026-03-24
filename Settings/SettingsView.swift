@@ -131,6 +131,11 @@ struct SettingsView: View {
           Label("Smart Keys", systemImage: "keyboard.badge.ellipsis")
         }, storyBoardId: "BKSmartKeysConfigViewController")
         Row {
+          Label("Toolbar Profiles", systemImage: "square.stack.3d.up")
+        } details: {
+          KBToolbarProfilesView()
+        }
+        Row {
           Label("Notifications", systemImage: "bell")
         } details: {
           BKNotificationsView()

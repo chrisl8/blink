@@ -64,6 +64,16 @@ enum KBDevice {
     default: return .iPhone(lang: lang)
     }
   }
+
+  func layoutFor(lang: String, profile: KBToolbarProfile?) -> KBLayout {
+    guard let profile = profile else { return layoutFor(lang: lang) }
+    let base = layoutFor(lang: lang)
+    return KBLayout(
+      profile.leftKeys ?? base.left,
+      profile.middleKeys,
+      profile.rightKeys ?? base.right
+    )
+  }
   
   func sizesFor(portrait: Bool) -> KBSizes {
     switch self {

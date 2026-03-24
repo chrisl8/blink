@@ -47,7 +47,14 @@ class KBView: UIView {
   //private var _glassEffectView: UIVisualEffectView?
   
   var repeatingSequence: String? = nil
-  
+  var activeProfile: KBToolbarProfile? = nil {
+    didSet {
+      if oldValue?.id != activeProfile?.id {
+        _updateSections()
+      }
+    }
+  }
+
   var safeBarWidth: CGFloat = 0
   var kbDevice: KBDevice = .detect() {
     didSet {
@@ -85,7 +92,7 @@ class KBView: UIView {
   }
   
   override init(frame: CGRect) {
-    let layout = kbDevice.layoutFor(lang: lang)
+    let layout = kbDevice.layoutFor(lang: lang, profile: activeProfile)
     
     _leftSection = KBSection(keys:layout.left)
     _middleSection = KBSection(keys:layout.middle)
@@ -151,17 +158,28 @@ class KBView: UIView {
   //   backgroundColor = UIColor.systemBackground.withAlphaComponent(0.1)
   // }
   
+
+  override func didMoveToSuperview() {
+    super.didMoveToSuperview()
+    if superview != nil && activeProfile == nil {
+      DispatchQueue.main.async { [weak self] in
+        guard let self = self, self.activeProfile == nil else { return }
+        self.activeProfile = KBToolbarProfileManager.shared.activeProfile()
+      }
+    }
+  }
+
   func _updateSections() {
     _leftSection.views.forEach { $0.removeFromSuperview() }
     _middleSection.views.forEach { $0.removeFromSuperview() }
     _rightSection.views.forEach { $0.removeFromSuperview() }
-    
-    let layout = kbDevice.layoutFor(lang: lang)
-    
+
+    let layout = kbDevice.layoutFor(lang: lang, profile: activeProfile)
+
     _leftSection   = KBSection(keys:layout.left)
     _middleSection = KBSection(keys:layout.middle)
     _rightSection  = KBSection(keys:layout.right)
-    
+
     setNeedsLayout()
   }
   
@@ -424,6 +442,17 @@ extension KBView: KBKeyViewDelegate {
 
     defer { turnOffUntracked() }
 
+    if case .config = value {
+      UIApplication.shared.sendAction(
+        NSSelectorFromString("showConfigAction"), to: nil, from: nil, for: nil)
+      return
+    }
+
+    if case .profileSwitch = value {
+      _showProfileSwitcher()
+      return
+    }
+
     guard let keyInput = keyInput
     else {
       return
@@ -435,6 +464,11 @@ extension KBView: KBKeyViewDelegate {
       return
     }
 
+    if case .dismissKB = value {
+      _ = keyInput.resignFirstResponder()
+      return
+    }
+    
     let keyCode = value.keyCode
     var keyId = keyCode.id
     keyId += ":\(value.text)"
@@ -481,6 +515,36 @@ extension KBView: KBKeyViewDelegate {
  
   
   
+  private func _showProfileSwitcher() {
+    let manager = KBToolbarProfileManager.shared
+    let profiles = manager.loadAll()
+    guard !profiles.isEmpty else { return }
+
+    let alert = UIAlertController(title: "Toolbar Profile", message: nil, preferredStyle: .actionSheet)
+    let activeId = manager.activeProfileId
+
+    for profile in profiles {
+      let title = profile.id == activeId ? "\(profile.name) ✓" : profile.name
+      alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+        manager.setActiveProfile(id: profile.id)
+        self?.activeProfile = profile
+      })
+    }
+
+    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+    if let popover = alert.popoverPresentationController {
+      popover.sourceView = self
+      popover.sourceRect = CGRect(x: bounds.midX, y: bounds.minY, width: 0, height: 0)
+    }
+
+    if let vc = self.window?.rootViewController {
+      var presented = vc
+      while let next = presented.presentedViewController { presented = next }
+      presented.present(alert, animated: true)
+    }
+  }
+
   func keyViewTouchesBegin(keyView: KBKeyView, touches: Set<UITouch>) {
     guard
       let touch = touches.first

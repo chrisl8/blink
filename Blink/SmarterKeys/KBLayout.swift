@@ -54,7 +54,9 @@ extension KBLayout {
       .wideKey(.esc,  traits: .default - .portrait),
       .key(.ctrl, traits: .default),
       .key(.alt,  traits: .default),
-      .icon(.hideKB, traits: .default - .cmdOff),
+      .icon(.config, traits: .default),
+      .icon(.profileSwitch, traits: .default),
+      .arrows(traits: .default - .cmdOff),
     ], [
       .key(.tab,  traits: .default - .cmdOn),
       .vertical2("`", "~",  traits: .default - .cmdOn),
@@ -92,6 +94,7 @@ extension KBLayout {
     [
       .arrows(traits: .default - .cmdOn),
       .wideKey(.cmd, traits: .default + .hkb),
+      .icon(.dismissKB, traits: .default),
     ])
   }
   
@@ -155,6 +158,8 @@ extension KBLayout {
      .icon(.ctrl,  traits: .defaultSuggestionsOnly),
      .icon(.alt,   traits: .defaultSuggestionsOnly),
      .icon(.tab,   traits: .defaultSuggestionsOnly),
+     .icon(.config, traits: .default),
+     .icon(.profileSwitch, traits: .default),
      .arrows(traits: .default - .cmdOff),
    ], [
      .key(.tab,  traits: .default - .cmdOn),
@@ -176,9 +181,10 @@ extension KBLayout {
      .arrows(traits: .default - .cmdOn),
      .wideKey(    .cmd,   traits: .default + .hkb),
      .icon(   .cmd,   traits: .defaultSuggestionsOnly + .hkb),
+     .icon(.dismissKB, traits: .default),
    ])
   }
-  
+
   // MARK: iPad 10.5"
   
   static func _iPad_10_5_middle(lang: String) -> [KBKey] {
@@ -230,7 +236,7 @@ extension KBLayout {
   }
   
   static func iPad_10_5(lang: String) -> Self {
-    
+
     return Self([
       .wideKey(.esc,  traits: .default),
       .wideKey(.ctrl, traits: .default),
@@ -240,6 +246,8 @@ extension KBLayout {
       .icon(.ctrl,  traits: .defaultSuggestionsOnly),
       .icon(.alt,   traits: .defaultSuggestionsOnly),
       .icon(.tab,   traits: .defaultSuggestionsOnly),
+      .icon(.config, traits: .default),
+      .icon(.profileSwitch, traits: .default),
       .arrows(traits: .default - .cmdOff),
     ], [
       .key(.tab,  traits: .default - .cmdOn),
@@ -261,9 +269,10 @@ extension KBLayout {
       .arrows(traits: .default - .cmdOn),
       .wideKey(    .cmd,   traits: .default + .hkb),
       .icon(.cmd,    traits: .defaultSuggestionsOnly + .hkb),
+      .icon(.dismissKB, traits: .default),
     ])
   }
-  
+
   // MARK: iPad 11"
   
   static func _iPad_11_middle(lang: String) -> [KBKey] {
@@ -323,6 +332,8 @@ extension KBLayout {
       .key(   .esc,  traits: .defaultSuggestionsOnly),
       .key(  .ctrl,  traits: .defaultSuggestionsOnly),
       .icon(  .alt,  traits: .defaultSuggestionsOnly),
+      .icon(.config, traits: .default),
+      .icon(.profileSwitch, traits: .default),
       .arrows(traits: .default - .cmdOff),
     ], _iPad_11_middle(lang: lang) + [
       //
@@ -339,15 +350,12 @@ extension KBLayout {
     ], [
       .icon(   .copy,  traits: .all - .selectionOff - .skb),
       .icon(   .paste, traits: .all - .clipboardOff - .skb),
-//      .key(    .left,  traits: .default),
-//      .key(    .down,  traits: .default),
-//      .key(    .up,    traits: .default),
-//      .key(    .right, traits: .default),
       .arrows(traits: .default - .cmdOn),
 
       .wideKey(.cmd,   traits: .default),
       .key(    .cmd,   traits: .default + .hkb - .skb),
       .icon(   .cmd,   traits: .defaultSuggestionsOnly + .hkb),
+      .icon(.dismissKB, traits: .default),
     ])
   }
   
@@ -398,7 +406,7 @@ extension KBLayout {
   }
   
   static func iPad_12_9(lang: String) -> Self {
-    
+
     return Self([
       .wideKey(.esc,  traits: .default),
       .wideKey(.ctrl, traits: .default),
@@ -407,6 +415,8 @@ extension KBLayout {
       .wideKey(.esc,  traits: .defaultSuggestionsOnly),
       .wideKey(.ctrl, traits: .defaultSuggestionsOnly),
       .wideKey(.alt,  traits: .defaultSuggestionsOnly),
+      .icon(.config, traits: .default),
+      .icon(.profileSwitch, traits: .default),
     ], _iPad_12_9_middle(lang: lang) + [
       // -
       .vertical2("<", "*", traits: .default - .cmdOff),
@@ -431,6 +441,7 @@ extension KBLayout {
       .key(    .cmd, traits: .default - .landscape),
       .key(    .cmd, traits: .default + .hkb - .skb),
       .wideKey(.cmd, traits: .defaultSuggestionsOnly + .hkb),
+      .icon(.dismissKB, traits: .default),
     ])
   }
 }

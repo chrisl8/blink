@@ -86,31 +86,31 @@ extension KBSizes {
   // MARK: Portrait iPhone sizes 📱
   
   static var portrait_iPhone_4: Self {
-    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (.icon, key: 33, wide: 39)))
+    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (39, key: 33, wide: 39)))
   }
   
   static var portrait_iPhone_4_7: Self {
-    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (.icon, key: 33, wide: 39)))
+    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (39, key: 33, wide: 39)))
   }
   
   static var portrait_iPhone_5_5: Self {
-    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (.icon, key: 33, wide: 39)))
+    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (39, key: 33, wide: 39)))
   }
   
   static var portrait_iPhone_5_8: Self {
-    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (.icon, key: 33, wide: 39)))
+    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (39, key: 33, wide: 39)))
   }
   
   static var portrait_iPhone_6_1: Self {
-    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (.icon, key: 33, wide: 39)))
+    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (39, key: 33, wide: 39)))
   }
   
   static var portrait_iPhone_6_5: Self {
-    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (.icon, key: 33, wide: 39)))
+    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (39, key: 33, wide: 39)))
   }
   
   static var portrait_iPhone_6_7: Self {
-    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (.icon, key: 34, wide: 40)))
+    Self(kb: _portraitPhoneKB, key: (_fontsSmall, _insetsSmall, .cornerSmall, widths: (40, key: 34, wide: 40)))
   }
   
   // MARK: Portrait iPad sizes

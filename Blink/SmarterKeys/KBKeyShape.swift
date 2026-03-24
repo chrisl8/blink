@@ -31,7 +31,7 @@
 
 import Foundation
 
-enum KBKeyShape: Hashable {
+enum KBKeyShape: Hashable, Codable {
   // Compact sized button
   case icon(value: KBKeyValue)
   // Standart sized button
@@ -61,7 +61,12 @@ enum KBKeyShape: Hashable {
       self = .wideKey(value: value)
       return
     }
-    
+
+    if let value: KBKeyValue = try container.decodeIfPresent(KBKeyValue.self, forKey: .flexKey) {
+      self = .flexKey(value: value)
+      return
+    }
+
     if container.contains(.arrows) {
       self = .arrows
       return

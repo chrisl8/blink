@@ -59,6 +59,7 @@
 + (NSURL *) blinkSSHConfigFileURL;
 + (NSURL *) blinkGlobalSSHConfigFileURL;
 + (NSURL *) blinkKBConfigURL;
++ (NSURL *) blinkToolbarProfilesURL;
 
 + (NSString *) blinkKeysFile;
 + (NSString *) blinkHostsFile;
