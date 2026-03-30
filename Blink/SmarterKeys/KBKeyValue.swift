@@ -72,8 +72,10 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
   case cmd
   case alt
   case ctrl
+  case shift
   case esc
   case tab
+  case `return`
   case left
   case right
   case up
@@ -82,7 +84,6 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
   case paste
   case hideKB
   case config
-  case dismissKB
   case profileSwitch
   case text(value: String)
   case f(Int8)
@@ -91,8 +92,10 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
     switch self {
     case .cmd:   return "cmd"
     case .tab:   return "tab"
+    case .return: return "return"
     case .alt:   return "alt"
     case .ctrl:  return "ctrl"
+    case .shift: return "shift"
     case .esc:   return "esc"
     case .left:  return "left"
     case .right: return "right"
@@ -102,7 +105,6 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
     case .paste: return "paste"
     case .hideKB: return "hideKB"
     case .config: return "config"
-    case .dismissKB: return "dismissKB"
     case .profileSwitch: return "profileSwitch"
     case .text(let value): return value
     case .f(let value): return "F\(value)"
@@ -113,8 +115,10 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
     switch self {
     case .cmd: return .commandLeft
     case .tab: return .tab
+    case .return: return .return
     case .alt: return .optionLeft
     case .ctrl: return .controlLeft
+    case .shift: return .shiftLeft
     case .esc: return .escape
     case .left: return .left
     case .right: return .right
@@ -137,7 +141,6 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
       default: return .unidentified
       }
     case .config: return .unidentified
-    case .dismissKB: return .unidentified
     case .profileSwitch: return .unidentified
     case .text(value: let ch):
       switch ch {
@@ -162,15 +165,16 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
     case .cmd: return "Command"
     case .copy: return "Copy"
     case .ctrl: return "Control"
+    case .shift: return "Shift"
     case .down: return "Down"
     case .esc: return "Escape"
     case .left: return "Left"
     case .right: return "Right"
     case .paste: return "Paste"
     case .config: return "Settings"
-    case .dismissKB: return "Dismiss Keyboard"
     case .profileSwitch: return "Switch Profile"
     case .tab: return "Tab"
+    case .return: return "Return"
     case .up: return "Up"
     case .hideKB: return "Hide Keyboard"
     case .text(let value): return value
@@ -194,6 +198,7 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
     case .up: return UIKeyCommand.inputUpArrow
     case .down: return UIKeyCommand.inputDownArrow
     case .tab: return "\t"
+    case .return: return "\r"
     case .hideKB: return "hideKeyboard"
     default: return nil
     }
@@ -203,8 +208,10 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
     switch self {
     case .cmd:   return "command"
     case .tab:   return "arrow.right.to.line.alt"
+    case .return: return "return.left"
     case .alt:   return "alt"
     case .ctrl:  return "control"
+    case .shift: return "shift"
     case .esc:   return "escape"
 
     case .left:  return "arrow.left"
@@ -217,7 +224,6 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
     case .paste: return "doc.on.clipboard"
     case .hideKB: return "keyboard.chevron.compact.down"
     case .config: return "gearshape"
-    case .dismissKB: return "keyboard.chevron.compact.down"
     case .profileSwitch: return "square.stack.3d.up"
     default:     return nil
     }
@@ -234,12 +240,12 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
   }
   
   static var specials: [Self] {
-    [.cmd, .alt, .ctrl, .esc, .tab, .left, .right, .up, .down, .copy, .paste, .hideKB, .config, .dismissKB, .profileSwitch]
+    [.cmd, .alt, .ctrl, .shift, .esc, .tab, .return, .left, .right, .up, .down, .copy, .paste, .hideKB, .config, .profileSwitch]
   }
   
   var isModifier: Bool {
     switch self {
-    case .alt, .ctrl, .cmd: return true
+    case .alt, .ctrl, .cmd, .shift: return true
     default: return false
     }
   }

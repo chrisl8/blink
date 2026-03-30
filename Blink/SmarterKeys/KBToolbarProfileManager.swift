@@ -33,24 +33,28 @@ import Foundation
 
 class KBToolbarProfileManager {
   static let shared = KBToolbarProfileManager()
-
-  private static let activeProfileKey = "KBToolbarActiveProfileId"
+  static let profileDidChangeNotification = Notification.Name("KBToolbarProfileDidChange")
 
   private var _profilesURL: URL {
     BlinkPaths.blinkToolbarProfilesURL()
   }
 
+  private var _activeProfileIdURL: URL {
+    _profilesURL.appendingPathComponent("active_profile_id")
+  }
+
   var activeProfileId: UUID? {
     get {
-      guard let str = UserDefaults.standard.string(forKey: Self.activeProfileKey),
-            let uuid = UUID(uuidString: str) else { return nil }
+      guard let str = try? String(contentsOf: _activeProfileIdURL, encoding: .utf8),
+            let uuid = UUID(uuidString: str.trimmingCharacters(in: .whitespacesAndNewlines))
+      else { return nil }
       return uuid
     }
     set {
       if let id = newValue {
-        UserDefaults.standard.set(id.uuidString, forKey: Self.activeProfileKey)
+        try? id.uuidString.write(to: _activeProfileIdURL, atomically: true, encoding: .utf8)
       } else {
-        UserDefaults.standard.removeObject(forKey: Self.activeProfileKey)
+        try? FileManager.default.removeItem(at: _activeProfileIdURL)
       }
     }
   }
@@ -64,6 +68,7 @@ class KBToolbarProfileManager {
     do {
       let data = try JSONEncoder().encode(profile)
       try data.write(to: fileURL, options: .atomic)
+      NotificationCenter.default.post(name: Self.profileDidChangeNotification, object: nil, userInfo: ["profileId": profile.id])
     } catch {
       debugPrint("KBToolbarProfileManager: failed to save profile:", error)
     }
@@ -99,8 +104,16 @@ class KBToolbarProfileManager {
   }
 
   func activeProfile() -> KBToolbarProfile? {
-    guard let id = activeProfileId else { return nil }
-    return load(id: id)
+    if let id = activeProfileId, let profile = load(id: id) {
+      return profile
+    }
+    // Active ID is missing or points to a deleted profile — fall back to first available
+    let profiles = loadAll()
+    if let first = profiles.first {
+      activeProfileId = first.id
+      return first
+    }
+    return nil
   }
 
   func ensureDefaultProfile(for device: KBDevice, lang: String) {

@@ -101,6 +101,14 @@ struct KBToolbarProfilesView: View {
   }
 }
 
+// MARK: - Key Group
+
+private struct KeyGroup: Identifiable {
+  let id: String
+  let title: String
+  let keys: [KBKey]
+}
+
 // MARK: - Profile Edit View
 
 struct KBToolbarProfileEditView: View {
@@ -111,6 +119,9 @@ struct KBToolbarProfileEditView: View {
   @State private var leftKeys: [KBKey] = []
   @State private var middleKeys: [KBKey] = []
   @State private var rightKeys: [KBKey] = []
+  @State private var customLeftChar: String = ""
+  @State private var customMiddleChar: String = ""
+  @State private var customRightChar: String = ""
   @Environment(\.dismiss) private var dismiss
 
   private let manager = KBToolbarProfileManager.shared
@@ -131,13 +142,15 @@ struct KBToolbarProfileEditView: View {
       }
 
       Section("Add Left Keys") {
-        ForEach(sideAvailableKeys, id: \.id) { key in
-          Button(action: { leftKeys.append(key) }) {
-            HStack {
-              Text(displayText(for: key))
-              Spacer()
-              Image(systemName: "plus.circle")
-                .foregroundColor(.accentColor)
+        customCharRow(char: $customLeftChar) { key in
+          leftKeys.append(key)
+        }
+        ForEach(sideKeyGroups) { group in
+          DisclosureGroup(group.title) {
+            ForEach(group.keys, id: \.id) { key in
+              Button(action: { leftKeys.append(key) }) {
+                addKeyRow(key: key)
+              }
             }
           }
         }
@@ -153,13 +166,15 @@ struct KBToolbarProfileEditView: View {
       }
 
       Section("Add Middle Keys") {
-        ForEach(middleAvailableKeys, id: \.id) { key in
-          Button(action: { middleKeys.append(key) }) {
-            HStack {
-              Text(displayText(for: key))
-              Spacer()
-              Image(systemName: "plus.circle")
-                .foregroundColor(.accentColor)
+        customCharRow(char: $customMiddleChar, useFlexKey: true) { key in
+          middleKeys.append(key)
+        }
+        ForEach(middleKeyGroups) { group in
+          DisclosureGroup(group.title) {
+            ForEach(group.keys, id: \.id) { key in
+              Button(action: { middleKeys.append(key) }) {
+                addKeyRow(key: key)
+              }
             }
           }
         }
@@ -175,13 +190,15 @@ struct KBToolbarProfileEditView: View {
       }
 
       Section("Add Right Keys") {
-        ForEach(sideAvailableKeys, id: \.id) { key in
-          Button(action: { rightKeys.append(key) }) {
-            HStack {
-              Text(displayText(for: key))
-              Spacer()
-              Image(systemName: "plus.circle")
-                .foregroundColor(.accentColor)
+        customCharRow(char: $customRightChar) { key in
+          rightKeys.append(key)
+        }
+        ForEach(sideKeyGroups) { group in
+          DisclosureGroup(group.title) {
+            ForEach(group.keys, id: \.id) { key in
+              Button(action: { rightKeys.append(key) }) {
+                addKeyRow(key: key)
+              }
             }
           }
         }
@@ -227,6 +244,44 @@ struct KBToolbarProfileEditView: View {
     }
   }
 
+  // MARK: - Subviews
+
+  private func addKeyRow(key: KBKey) -> some View {
+    HStack {
+      Text(displayText(for: key))
+      Spacer()
+      Image(systemName: "plus.circle")
+        .foregroundColor(.accentColor)
+    }
+  }
+
+  private func customCharRow(char: Binding<String>, useFlexKey: Bool = false, onAdd: @escaping (KBKey) -> Void) -> some View {
+    HStack {
+      TextField("Custom character", text: char)
+        .frame(maxWidth: 150)
+        .onChange(of: char.wrappedValue) { newValue in
+          if newValue.count > 1 {
+            char.wrappedValue = String(newValue.suffix(1))
+          }
+        }
+      Spacer()
+      Button(action: {
+        guard let ch = char.wrappedValue.first else { return }
+        let key: KBKey = useFlexKey
+          ? .flexKey(.text(value: String(ch)), traits: .all)
+          : .key(.text(value: String(ch)), traits: .all)
+        onAdd(key)
+        char.wrappedValue = ""
+      }) {
+        Image(systemName: "plus.circle")
+          .foregroundColor(.accentColor)
+      }
+      .disabled(char.wrappedValue.isEmpty)
+    }
+  }
+
+  // MARK: - Display
+
   private func displayText(for key: KBKey) -> String {
     if case .arrows = key.shape {
       return "Arrows"
@@ -240,81 +295,87 @@ struct KBToolbarProfileEditView: View {
     }
   }
 
-  // Keys available for left/right sections: modifiers, action icons, arrows, plus char/function keys
-  private var sideAvailableKeys: [KBKey] {
-    var keys: [KBKey] = [
-      .wideKey(.esc, traits: .all),
-      .wideKey(.ctrl, traits: .all),
-      .wideKey(.alt, traits: .all),
-      .wideKey(.cmd, traits: .all),
-      .icon(.config, traits: .all),
-      .icon(.profileSwitch, traits: .all),
-      .icon(.copy, traits: .all),
-      .icon(.paste, traits: .all),
-      .icon(.dismissKB, traits: .all),
+  // MARK: - Available Key Groups
+
+  private var sideKeyGroups: [KeyGroup] {
+    buildKeyGroups(isSide: true)
+  }
+
+  private var middleKeyGroups: [KeyGroup] {
+    buildKeyGroups(isSide: false)
+  }
+
+  private func buildKeyGroups(isSide: Bool) -> [KeyGroup] {
+    var groups: [KeyGroup] = []
+
+    if isSide {
+      groups.append(KeyGroup(id: "modifiers", title: "Modifiers & Actions", keys: [
+        .wideKey(.esc, traits: .all),
+        .wideKey(.ctrl, traits: .all),
+        .wideKey(.alt, traits: .all),
+        .wideKey(.cmd, traits: .all),
+        .wideKey(.shift, traits: .all),
+        .icon(.config, traits: .all),
+        .icon(.profileSwitch, traits: .all),
+        .icon(.copy, traits: .all),
+        .icon(.paste, traits: .all),
+        .icon(.hideKB, traits: .all),
+      ]))
+    } else {
+      groups.append(KeyGroup(id: "modifiers", title: "Modifiers & Actions", keys: [
+        .key(.tab, traits: .all),
+        .key(.return, traits: .all),
+        .key(.esc, traits: .all),
+        .icon(.config, traits: .all),
+        .icon(.profileSwitch, traits: .all),
+        .icon(.copy, traits: .all),
+        .icon(.paste, traits: .all),
+        .icon(.hideKB, traits: .all),
+        .key(.ctrl, traits: .all),
+        .key(.alt, traits: .all),
+        .key(.cmd, traits: .all),
+        .key(.shift, traits: .all),
+      ]))
+    }
+
+    groups.append(KeyGroup(id: "navigation", title: "Navigation", keys: [
       .arrows(traits: .all),
       .key(.left, traits: .all),
       .key(.right, traits: .all),
       .key(.up, traits: .all),
       .key(.down, traits: .all),
-      .key(.tab, traits: .all),
-    ]
+    ] + (isSide ? [.key(.tab, traits: .all), .key(.return, traits: .all)] : [])))
 
-    let charKeys: [String] = [
+    let textKey: (String) -> KBKey = isSide
+      ? { .key(.text(value: $0), traits: .all) }
+      : { .flexKey(.text(value: $0), traits: .all) }
+
+    groups.append(KeyGroup(id: "numbers", title: "Numbers", keys:
+      (0...9).map { textKey("\($0)") }
+    ))
+
+    groups.append(KeyGroup(id: "letters", title: "Letters", keys:
+      "abcdefghijklmnopqrstuvwxyz".map { textKey(String($0)) }
+    ))
+
+    let symbols: [String] = [
       "`", "~", "@", "#", "$", "^", "_",
       "-", "=", "+", "[", "]", "{", "}",
       "\\", "|", "<", ">", "/", "?",
       ".", "!", ",", "%", ";", ":", "&", "'", "\"", "*"
     ]
+    groups.append(KeyGroup(id: "symbols", title: "Symbols", keys:
+      symbols.map { textKey($0) }
+    ))
 
-    for ch in charKeys {
-      keys.append(.key(.text(value: ch), traits: .all))
-    }
+    groups.append(KeyGroup(id: "fkeys", title: "Function Keys", keys:
+      (1...12).map { .key(.f(Int8($0)), traits: .all) }
+    ))
 
-    for n: Int8 in 1...12 {
-      keys.append(.key(.f(n), traits: .all))
-    }
-
-    return keys
+    return groups
   }
 
-  // Keys available for the middle section (original palette)
-  private var middleAvailableKeys: [KBKey] {
-    let charKeys: [String] = [
-      "`", "~", "@", "#", "$", "^", "_",
-      "-", "=", "+", "[", "]", "{", "}",
-      "\\", "|", "<", ">", "/", "?",
-      ".", "!", ",", "%", ";", ":", "&", "'", "\"", "*"
-    ]
-
-    var keys: [KBKey] = [
-      .key(.tab, traits: .all),
-      .key(.esc, traits: .all),
-      .icon(.config, traits: .all),
-      .icon(.profileSwitch, traits: .all),
-      .icon(.copy, traits: .all),
-      .icon(.paste, traits: .all),
-      .icon(.dismissKB, traits: .all),
-      .key(.ctrl, traits: .all),
-      .key(.alt, traits: .all),
-      .key(.cmd, traits: .all),
-      .arrows(traits: .all),
-      .key(.left, traits: .all),
-      .key(.right, traits: .all),
-      .key(.up, traits: .all),
-      .key(.down, traits: .all),
-    ]
-
-    for ch in charKeys {
-      keys.append(.key(.text(value: ch), traits: .all))
-    }
-
-    for n: Int8 in 1...12 {
-      keys.append(.key(.f(n), traits: .all))
-    }
-
-    return keys
-  }
+  // MARK: - Save
 
   private func saveProfile() {
     var p: KBToolbarProfile

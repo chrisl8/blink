@@ -76,17 +76,21 @@ struct KBTraits: OptionSet, Hashable, Codable {
   
   static let suggestionsOff = Self(rawValue: 1 << 24)
   static let suggestionsOn  = Self(rawValue: 1 << 25)
-  
+
+  static let shiftOn             = Self(rawValue: 1 << 26)
+  static let shiftOff            = Self(rawValue: 1 << 27)
+
   // shortcuts
   static let orientations:Self    = [.portrait, .landscape]
   static let kbs: Self            = [.hkb, .skb]
-  
+
   static let esc: Self            = [.escOn, .escOff]
   static let alt: Self            = [.altOn, .altOff]
   static let ctrl: Self           = [.ctrlOn, .ctrlOff]
   static let cmd: Self            = [.cmdOn, .cmdOff]
-  
-  static let modifiers:Self       = [.esc, .alt, .ctrl, .cmd]
+  static let shift: Self          = [.shiftOn, .shiftOff]
+
+  static let modifiers:Self       = [.esc, .alt, .ctrl, .cmd, .shift]
   static let styles: Self         = [.light, .dark]
   static let floatingKB: Self     = [.floatingKBOn, .floatingKBOff]
   static let floatingCursor: Self = [.floatingCursorOn, .floatingCursorOff]
@@ -109,7 +113,7 @@ struct KBTraits: OptionSet, Hashable, Codable {
   ]
   
   static let initial = Self.all - [
-    .escOn, .cmdOn, .ctrlOn, .altOn,
+    .escOn, .cmdOn, .ctrlOn, .altOn, .shiftOn,
     .floatingKBOn, .floatingCursorOn,
     .portrait, .hkb, .selectionOn, .clipboardOn,
     .imeOn, .suggestionsOn
@@ -241,6 +245,9 @@ extension KBTraits {
     }
     if contains(.ctrlOn) {
       flags.insert(.control)
+    }
+    if contains(.shiftOn) {
+      flags.insert(.shift)
     }
     return flags
   }

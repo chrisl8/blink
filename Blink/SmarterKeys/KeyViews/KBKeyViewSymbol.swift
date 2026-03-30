@@ -33,35 +33,48 @@ import UIKit
 
 class KBKeyViewSymbol: KBKeyView {
   var _imageView: UIImageView
-  
+  private var _textLabel: UILabel?
+
   override init(key: KBKey, keyDelegate: KBKeyViewDelegate) {
     _imageView = UIImageView(
       image: UIImage(
         systemName: key.shape.primaryValue.symbolName ?? "questionmark.diamond"
       )
     )
-    
+
     super.init(key: key, keyDelegate: keyDelegate)
-    
+
     isAccessibilityElement = true
     accessibilityValue = key.shape.primaryValue.accessibilityLabel
     accessibilityTraits.insert(UIAccessibilityTraits.keyboardKey)
-    
+
     let kbSizes = keyDelegate.kbSizes
 
-    _imageView.contentMode = .center
-    _imageView.preferredSymbolConfiguration = .init(pointSize: kbSizes.key.fonts.symbol,
-                                                    weight: .regular)
-
-    _imageView.tintColor = UIColor.label
-    
-    
-    addSubview(_imageView)
+    if key.shape.primaryValue.symbolName == nil, case .text(let value) = key.shape.primaryValue {
+      _imageView.isHidden = true
+      let label = UILabel()
+      label.text = value
+      label.textAlignment = .center
+      label.textColor = UIColor.label
+      label.font = UIFont.systemFont(ofSize: kbSizes.key.fonts.symbol, weight: .medium)
+      label.adjustsFontSizeToFitWidth = true
+      label.minimumScaleFactor = 0.5
+      addSubview(label)
+      _textLabel = label
+    } else {
+      _imageView.contentMode = .center
+      _imageView.preferredSymbolConfiguration = .init(pointSize: kbSizes.key.fonts.symbol,
+                                                      weight: .regular)
+      _imageView.tintColor = UIColor.label
+      addSubview(_imageView)
+    }
   }
-  
+
   override func layoutSubviews() {
     super.layoutSubviews()
-    _imageView.frame = bounds.inset(by: keyDelegate.kbSizes.key.insets.symbol)
+    let insets = keyDelegate.kbSizes.key.insets.symbol
+    _imageView.frame = bounds.inset(by: insets)
+    _textLabel?.frame = bounds.inset(by: insets)
   }
   
   override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -95,7 +108,7 @@ class KBKeyViewSymbol: KBKeyView {
   
   override var shouldAutoRepeat: Bool {
     switch key.shape.primaryValue {
-    case .esc, .left, .right, .up, .down, .tab:
+    case .esc, .left, .right, .up, .down, .tab, .return:
       return true
     default: return super.shouldAutoRepeat
     }
@@ -115,5 +128,9 @@ class KBKeyViewSymbol: KBKeyView {
       accessibilityTraits.insert([.selected])
     }
   }
-  
+
+  func updateIcon(systemName: String) {
+    _imageView.image = UIImage(systemName: systemName)
+  }
+
 }

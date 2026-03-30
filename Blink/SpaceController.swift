@@ -68,6 +68,10 @@ class SpaceController: UIViewController, LayoutInsetsProvider {
   private var _snippetsVC: SnippetsViewController? = nil
   private var _blinkMenu: BlinkMenu? = nil
   private var _bottomTapAreaView = UIView()
+  private var _statusBarInfoView = StatusBarInfoView()
+  private var _titlePollTimer: Timer?
+  private var _lastPolledTitle: String?
+  private var _sessionStartTimes: [UUID: Date] = [:]
 
   // Snips Input Mode tracking
   private var _isSnipsInputModeActive: Bool = false {
@@ -175,7 +179,15 @@ class SpaceController: UIViewController, LayoutInsetsProvider {
     _bottomTapAreaView.frame = CGRect(x: windowBounds.width * 0.5 - 250, y: windowBounds.height - height, width: 250 * 2, height: height)
 //    _bottomTapAreaView.backgroundColor = UIColor.red
     self.view.bringSubviewToFront(_bottomTapAreaView);
-    
+
+    #if !targetEnvironment(macCatalyst)
+    let topInset = view.safeAreaInsets.top
+    _statusBarInfoView.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: topInset)
+    _statusBarInfoView.isHidden = topInset < 20
+    view.bringSubviewToFront(_statusBarInfoView)
+    _updateStatusBarInfo()
+    #endif
+
   }
   
   private func forEachActive(block:(TermController) -> ()) {
@@ -253,6 +265,7 @@ class SpaceController: UIViewController, LayoutInsetsProvider {
   }
   
   deinit {
+    _titlePollTimer?.invalidate()
     NotificationCenter.default.removeObserver(self)
   }
 
@@ -312,7 +325,14 @@ class SpaceController: UIViewController, LayoutInsetsProvider {
     // KBObserver interaction removed - using UIKeyboardLayoutGuide instead
     
     self.view.addSubview(_bottomTapAreaView)
-    
+
+    #if !targetEnvironment(macCatalyst)
+    view.addSubview(_statusBarInfoView)
+    _titlePollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+      self?._pollTitleForStatusBar()
+    }
+    #endif
+
     let doubleTap = UITapGestureRecognizer(target: self, action: #selector(toggleQuickActionsAction))
     doubleTap.numberOfTapsRequired = 2
     doubleTap.numberOfTouchesRequired = 1
@@ -475,7 +495,8 @@ Please go to your subscriptions and cancel one of them!
     SessionRegistry.shared.track(session: term)
     
     _currentKey = term.meta.key
-    
+    _sessionStartTimes[term.meta.key] = Date()
+
     _viewportsController.setViewControllers([term], direction: .forward, animated: animated) { (didComplete) in
       self._displayHUD()
       self._attachInputToCurrentTerm()
@@ -497,6 +518,7 @@ Please go to your subscriptions and cancel one of them!
     }
     currentTerm()?.delegate = nil
     SessionRegistry.shared.remove(forKey: currentKey)
+    _sessionStartTimes.removeValue(forKey: currentKey)
     _viewportsKeys.remove(at: idx)
     if _viewportsKeys.isEmpty {
       _createShell(userActivity: nil, animated: true)
@@ -600,8 +622,41 @@ Please go to your subscriptions and cancel one of them!
     
     view.window?.windowScene?.title = sceneTitle
     self.view.setNeedsLayout()
+
+    _updateStatusBarInfo()
   }
-  
+
+  private func _updateStatusBarInfo() {
+    #if targetEnvironment(macCatalyst)
+    return
+    #else
+    guard let term = currentTerm() else {
+      _statusBarInfoView.isHidden = true
+      return
+    }
+
+    let pageNum = _viewportsKeys.firstIndex(of: term.meta.key)
+    let windowIndex = (pageNum ?? 0) + 1
+    let windowCount = _viewportsKeys.count
+    let title = term.termDevice.view?.title
+    _lastPolledTitle = title
+
+    _statusBarInfoView.update(
+      windowIndex: windowIndex,
+      windowCount: windowCount,
+      title: title,
+      bgColor: view.backgroundColor,
+      isRunningCmd: term.isRunningCmd(),
+      sessionStartTime: _sessionStartTimes[term.meta.key]
+    )
+    #endif
+  }
+
+  private func _pollTitleForStatusBar() {
+    // Always update — clock, uptime, and running-cmd state change independently of title
+    _updateStatusBarInfo()
+  }
+
 }
 
 // MARK: UIStateRestorable
@@ -816,7 +871,14 @@ extension SpaceController {
     case .zoomIn: currentTerm()?.termDevice.view?.increaseFontSize()
     case .zoomOut: currentTerm()?.termDevice.view?.decreaseFontSize()
     case .zoomReset: currentTerm()?.termDevice.view?.resetFontSize()
-    case .hideKeyboard: KBTracker.shared.input?.resignFirstResponder()
+    case .hideKeyboard:
+      if let input = KBTracker.shared.input {
+        if input.isRealFirstResponder {
+          input.toggleKeyboard()
+        } else {
+          _focusOnShell()
+        }
+      }
 
     }
   }

@@ -126,8 +126,11 @@ class KBTracker: NSObject {
     UIMenuSystem.main.setNeedsRebuild()
   }
   
+  var isKeyboardDismissed = false
+
   func attach(input: SmarterTermInput?) {
     self.input = input
+    input?.kbView.keyboardDismissed = isKeyboardDismissed
     input?.sync(traits: kbTraits, device: kbDevice, hideSmartKeysWithHKB: hideSmartKeysWithHKB)
   }
   

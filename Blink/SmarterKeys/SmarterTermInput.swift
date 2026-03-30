@@ -44,7 +44,8 @@ import Combine
   }()
   
   private var _inputAccessoryView: UIView? = nil
-  
+  private lazy var _emptyInputView: UIView = UIView(frame: .zero)
+
   var isHardwareKB: Bool { kbView.traits.isHKBAttached }
   
   weak var device: TermDevice? = nil {
@@ -209,6 +210,16 @@ import Combine
 
   override var inputAccessoryView: UIView? {
     return _inputAccessoryView
+  }
+
+  override var inputView: UIView? {
+    return KBTracker.shared.isKeyboardDismissed ? _emptyInputView : nil
+  }
+
+  func toggleKeyboard() {
+    KBTracker.shared.isKeyboardDismissed.toggle()
+    contentView()?.reloadInputViews()
+    kbView.keyboardDismissed = KBTracker.shared.isKeyboardDismissed
   }
 
   func sync(traits: KBTraits, device: KBDevice, hideSmartKeysWithHKB: Bool) {

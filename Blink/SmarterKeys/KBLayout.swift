@@ -94,7 +94,7 @@ extension KBLayout {
     [
       .arrows(traits: .default - .cmdOn),
       .wideKey(.cmd, traits: .default + .hkb),
-      .icon(.dismissKB, traits: .default),
+      .icon(.hideKB, traits: .default),
     ])
   }
   
@@ -181,7 +181,7 @@ extension KBLayout {
      .arrows(traits: .default - .cmdOn),
      .wideKey(    .cmd,   traits: .default + .hkb),
      .icon(   .cmd,   traits: .defaultSuggestionsOnly + .hkb),
-     .icon(.dismissKB, traits: .default),
+     .icon(.hideKB, traits: .default),
    ])
   }
 
@@ -269,7 +269,7 @@ extension KBLayout {
       .arrows(traits: .default - .cmdOn),
       .wideKey(    .cmd,   traits: .default + .hkb),
       .icon(.cmd,    traits: .defaultSuggestionsOnly + .hkb),
-      .icon(.dismissKB, traits: .default),
+      .icon(.hideKB, traits: .default),
     ])
   }
 
@@ -355,7 +355,7 @@ extension KBLayout {
       .wideKey(.cmd,   traits: .default),
       .key(    .cmd,   traits: .default + .hkb - .skb),
       .icon(   .cmd,   traits: .defaultSuggestionsOnly + .hkb),
-      .icon(.dismissKB, traits: .default),
+      .icon(.hideKB, traits: .default),
     ])
   }
   
@@ -441,7 +441,7 @@ extension KBLayout {
       .key(    .cmd, traits: .default - .landscape),
       .key(    .cmd, traits: .default + .hkb - .skb),
       .wideKey(.cmd, traits: .defaultSuggestionsOnly + .hkb),
-      .icon(.dismissKB, traits: .default),
+      .icon(.hideKB, traits: .default),
     ])
   }
 }

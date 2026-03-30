@@ -404,6 +404,7 @@
 		D2AB612023AB5AE000BE6585 /* UIApplication+Version.h in Sources */ = {isa = PBXBuildFile; fileRef = D2AB611F23AB5AE000BE6585 /* UIApplication+Version.h */; };
 		D2AC6749220303D900177BC5 /* openurl.m in Sources */ = {isa = PBXBuildFile; fileRef = D2AC6742220303D900177BC5 /* openurl.m */; };
 		D2AD8E5E27A2BAD600DED28D /* StatusBarLessViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AD8E5D27A2BAD600DED28D /* StatusBarLessViewController.swift */; };
+		A1B2C3D4E5F6A7B800112233 /* StatusBarInfoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B800112234 /* StatusBarInfoView.swift */; };
 		D2AD8E7427A2BAFA00DED28D /* EntitlementsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AD8E6527A2BAFA00DED28D /* EntitlementsManager.swift */; };
 		D2AD8E7527A2BAFA00DED28D /* PurchasesUserModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AD8E6627A2BAFA00DED28D /* PurchasesUserModel.swift */; };
 		D2AD8E7627A2BAFA00DED28D /* Purchases.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AD8E6727A2BAFA00DED28D /* Purchases.swift */; };
@@ -1160,6 +1161,7 @@
 		D2AC6742220303D900177BC5 /* openurl.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = openurl.m; sourceTree = "<group>"; };
 		D2AC674A22031EE600177BC5 /* openurl.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = openurl.h; sourceTree = "<group>"; };
 		D2AD8E5D27A2BAD600DED28D /* StatusBarLessViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StatusBarLessViewController.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B800112234 /* StatusBarInfoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarInfoView.swift; sourceTree = "<group>"; };
 		D2AD8E6527A2BAFA00DED28D /* EntitlementsManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EntitlementsManager.swift; sourceTree = "<group>"; };
 		D2AD8E6627A2BAFA00DED28D /* PurchasesUserModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PurchasesUserModel.swift; sourceTree = "<group>"; };
 		D2AD8E6727A2BAFA00DED28D /* Purchases.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Purchases.swift; sourceTree = "<group>"; };
@@ -1446,6 +1448,7 @@
 				0716B53C1CFFAB9300268B5B /* Info.plist */,
 				D29B4A8D274D1E9F00C66ED9 /* BrowserController.swift */,
 				D2AD8E5D27A2BAD600DED28D /* StatusBarLessViewController.swift */,
+				A1B2C3D4E5F6A7B800112234 /* StatusBarInfoView.swift */,
 				0716B5291CFFAB9300268B5B /* AppDelegate.h */,
 				0716B52A1CFFAB9300268B5B /* AppDelegate.m */,
 				0716B52C1CFFAB9300268B5B /* LaunchScreen.storyboard */,
@@ -3633,6 +3636,7 @@
 				D2FCB4DD2339F9DB00A88108 /* UIScrollView+Paging.swift in Sources */,
 				D21DEE4F260DD60D00D8E640 /* KeyDetailsView.swift in Sources */,
 				D2AD8E5E27A2BAD600DED28D /* StatusBarLessViewController.swift in Sources */,
+				A1B2C3D4E5F6A7B800112233 /* StatusBarInfoView.swift in Sources */,
 				C989E5571D6CC4A1003E0079 /* BKFontCreateViewController.m in Sources */,
 				D2CC13B729C05EE7008C71FA /* Intro.swift in Sources */,
 				D2ECBF4929645814004E95C4 /* BuildApi.swift in Sources */,
@@ -5339,7 +5343,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1085;
+				CURRENT_PROJECT_VERSION = 1087;
 				DEAD_CODE_STRIPPING = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEFINES_MODULE = YES;
@@ -5393,7 +5397,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1085;
+				CURRENT_PROJECT_VERSION = 1087;
 				DEAD_CODE_STRIPPING = NO;
 				DEFINES_MODULE = YES;
 				DEVELOPMENT_TEAM = TZ98575357;

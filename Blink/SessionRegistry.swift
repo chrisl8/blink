@@ -64,10 +64,32 @@ extension SuspendableSession {
   override init() {
     super.init()
     _fsReadMetaIndex()
-    
+    _clearSessionsIfNewDeploy()
+
     DispatchQueue.main.asyncAfter(wallDeadline: DispatchWallTime.now() + TimeInterval(10)) {
       self._cleanLostSessions()
     }
+  }
+
+  private static let _binaryMtimeKey = "BlinkSessionBinaryMtime"
+
+  private func _clearSessionsIfNewDeploy() {
+    guard let execURL = Bundle.main.executableURL,
+          let attrs = try? FileManager.default.attributesOfItem(atPath: execURL.path),
+          let currentMtime = attrs[.modificationDate] as? Date
+    else { return }
+
+    let defaults = UserDefaults.standard
+    let savedMtime = defaults.object(forKey: Self._binaryMtimeKey) as? Date
+
+    if savedMtime != currentMtime {
+      for key in _metaIndex.keys {
+        _fsRemove(forKey: key)
+      }
+      debugPrint("SessionRegistry: new binary detected, cleared \(_metaIndex.count) session state files")
+    }
+
+    defaults.set(currentMtime, forKey: Self._binaryMtimeKey)
   }
   
   func _cleanLostSessions() {

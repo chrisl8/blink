@@ -47,6 +47,13 @@ class KBView: UIView {
   //private var _glassEffectView: UIVisualEffectView?
   
   var repeatingSequence: String? = nil
+  var keyboardDismissed: Bool = false {
+    didSet {
+      if oldValue != keyboardDismissed {
+        _updateHideKeyButton()
+      }
+    }
+  }
   var activeProfile: KBToolbarProfile? = nil {
     didSet {
       if oldValue?.id != activeProfile?.id {
@@ -159,13 +166,33 @@ class KBView: UIView {
   // }
   
 
+  private var _profileChangeObserver: Any?
+
   override func didMoveToSuperview() {
     super.didMoveToSuperview()
     if superview != nil && activeProfile == nil {
       DispatchQueue.main.async { [weak self] in
         guard let self = self, self.activeProfile == nil else { return }
-        self.activeProfile = KBToolbarProfileManager.shared.activeProfile()
+        let manager = KBToolbarProfileManager.shared
+        manager.ensureDefaultProfile(for: self.kbDevice, lang: self.lang)
+        self.activeProfile = manager.activeProfile()
       }
+    }
+    if superview != nil && _profileChangeObserver == nil {
+      _profileChangeObserver = NotificationCenter.default.addObserver(
+        forName: KBToolbarProfileManager.profileDidChangeNotification,
+        object: nil, queue: .main
+      ) { [weak self] note in
+        guard let self = self,
+              let changedId = note.userInfo?["profileId"] as? UUID,
+              changedId == self.activeProfile?.id
+        else { return }
+        self.activeProfile = KBToolbarProfileManager.shared.load(id: changedId)
+        self._updateSections()
+      }
+    } else if superview == nil, let obs = _profileChangeObserver {
+      NotificationCenter.default.removeObserver(obs)
+      _profileChangeObserver = nil
     }
   }
 
@@ -182,7 +209,20 @@ class KBView: UIView {
 
     setNeedsLayout()
   }
-  
+
+  private func _updateHideKeyButton() {
+    for view in _rightSection.views {
+      if view.key.shape.primaryValue == .hideKB,
+         let symbolView = view as? KBKeyViewSymbol {
+        let iconName = keyboardDismissed
+          ? "keyboard"
+          : "keyboard.chevron.compact.down"
+        symbolView.updateIcon(systemName: iconName)
+        break
+      }
+    }
+  }
+
   override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
     super.traitCollectionDidChange(previousTraitCollection)
     traits.toggle(traitCollection.userInterfaceStyle == .light, on: .light, off: .dark)
@@ -239,6 +279,10 @@ class KBView: UIView {
     let leftViews   = _leftSection.apply(traits: traits, for: self, keyDelegate: self)
     let middleViews = _middleSection.apply(traits: traits, for: _scrollView, keyDelegate: self)
     let rightViews  = _rightSection.apply(traits: traits, for: self, keyDelegate: self)
+
+    if keyboardDismissed {
+      _updateHideKeyButton()
+    }
 
     var x = middleLeft
     for b in leftViews {
@@ -412,6 +456,8 @@ extension KBView: KBKeyViewDelegate {
       traits.toggle(value, on: .escOn , off: .escOff)
     case .ctrl:
       traits.toggle(value, on: .ctrlOn , off: .ctrlOff)
+    case .shift:
+      traits.toggle(value, on: .shiftOn , off: .shiftOff)
     default: break
     }
     
@@ -464,11 +510,6 @@ extension KBView: KBKeyViewDelegate {
       return
     }
 
-    if case .dismissKB = value {
-      _ = keyInput.resignFirstResponder()
-      return
-    }
-    
     let keyCode = value.keyCode
     var keyId = keyCode.id
     keyId += ":\(value.text)"
