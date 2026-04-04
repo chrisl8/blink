@@ -70,6 +70,12 @@ class StatusBarInfoView: UIView {
   private let leftDotTemplate = CALayer()
   private let rightDotTemplate = CALayer()
 
+  // Semi-stationary telemetry drift bits
+  private var driftBitLayers: [CALayer] = []
+  private let driftBitCount = 10
+  private let driftBitSize: CGFloat = 4.0
+  private let driftBitJitterRadius: CGFloat = 3.0
+
   // Track center exclusion for HUD animations
   private var _centerExclusion: CGFloat = 0
   private var _lastLayoutSize: CGSize = .zero
@@ -147,6 +153,15 @@ class StatusBarInfoView: UIView {
     rightDataStream.masksToBounds = true
     rightDataStream.addSublayer(rightDotTemplate)
     hudContainerLayer.addSublayer(rightDataStream)
+
+    // Drift bits — tiny diamond indicators
+    for _ in 0..<driftBitCount {
+      let bit = CALayer()
+      bit.bounds = CGRect(x: 0, y: 0, width: driftBitSize, height: driftBitSize)
+      bit.transform = CATransform3DMakeRotation(.pi / 4, 0, 0, 1)
+      hudContainerLayer.addSublayer(bit)
+      driftBitLayers.append(bit)
+    }
 
     addSubview(statusDot)
     addSubview(leftLabel)
@@ -290,6 +305,12 @@ class StatusBarInfoView: UIView {
     // Left data dots — green, right data dots — amber
     leftDotTemplate.backgroundColor = _hudGreenColor.cgColor
     rightDotTemplate.backgroundColor = _hudAmberColor.cgColor
+
+    // Drift bit colors — cycle through palette with extra dimming
+    let bitColors: [UIColor] = [_hudCyanColor, _hudAmberColor, _hudPurpleColor, _hudGreenColor]
+    for (i, bit) in driftBitLayers.enumerated() {
+      bit.backgroundColor = bitColors[i % bitColors.count].withAlphaComponent(0.7).cgColor
+    }
   }
 
   // MARK: - Title Parsing
@@ -428,6 +449,7 @@ class StatusBarInfoView: UIView {
     let hudStart = horizontalMargin
     let hudEnd = bounds.width - horizontalMargin
     let fullWidth = hudEnd - hudStart
+    let hudHeight = bounds.height - 25
     guard fullWidth > 40 else { return }
 
     let scanLineWidth: CGFloat = 60
@@ -489,6 +511,75 @@ class StatusBarInfoView: UIView {
     scrollAnimR.repeatCount = .infinity
     scrollAnimR.timingFunction = CAMediaTimingFunction(name: .linear)
     rightDataStream.add(scrollAnimR, forKey: "scroll")
+
+    // Drift bits — pseudo-random jitter animations
+    let now = CACurrentMediaTime()
+    for (i, bit) in driftBitLayers.enumerated() {
+      guard !bit.isHidden else { continue }
+
+      bit.removeAnimation(forKey: "drift")
+      bit.removeAnimation(forKey: "flicker")
+
+      let home = bit.position
+      srand48(i * 13 + 97)
+
+      // Build waypoints: home -> random offsets with dwell -> home
+      var waypoints: [NSValue] = [NSValue(cgPoint: home)]
+      var keyTimes: [NSNumber] = [0.0]
+      let stops = 5
+      var t: Double = 0
+
+      for j in 0..<stops {
+        // Short transition to next position
+        t += 0.04 + drand48() * 0.03
+        let angle = drand48() * .pi * 2
+        let dist = drand48() * Double(driftBitJitterRadius)
+        let wx = Double(home.x) + cos(angle) * dist
+        let wy = Double(home.y) + sin(angle) * dist
+        let clamped = CGPoint(
+          x: max(Double(hudStart + 2), min(Double(hudEnd - 2), wx)),
+          y: max(2, min(Double(hudHeight - 2), wy))
+        )
+        waypoints.append(NSValue(cgPoint: clamped))
+        keyTimes.append(NSNumber(value: min(t, 0.99)))
+
+        // Long dwell at this position
+        t += 0.12 + drand48() * 0.08
+        if j < stops - 1 {
+          waypoints.append(NSValue(cgPoint: clamped))
+          keyTimes.append(NSNumber(value: min(t, 0.99)))
+        }
+      }
+
+      // Return home
+      waypoints.append(NSValue(cgPoint: home))
+      keyTimes.append(1.0)
+
+      let timingFns = (0..<(waypoints.count - 1)).map { _ in
+        CAMediaTimingFunction(name: .easeInEaseOut)
+      }
+
+      let drift = CAKeyframeAnimation(keyPath: "position")
+      drift.values = waypoints
+      drift.keyTimes = keyTimes
+      drift.timingFunctions = timingFns
+      drift.duration = 14.0 + drand48() * 8.0
+      drift.repeatCount = .infinity
+      drift.beginTime = now + drand48() * 6.0
+      drift.fillMode = .backwards
+      bit.add(drift, forKey: "drift")
+
+      // Subtle opacity flicker
+      srand48(i * 31 + 53)
+      let flicker = CAKeyframeAnimation(keyPath: "opacity")
+      flicker.values = [0.7, 0.9, 0.5, 0.8, 0.55, 0.7] as [NSNumber]
+      flicker.keyTimes = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+      flicker.duration = 10.0 + drand48() * 8.0
+      flicker.repeatCount = .infinity
+      flicker.beginTime = now + drand48() * 4.0
+      flicker.fillMode = .backwards
+      bit.add(flicker, forKey: "flicker")
+    }
 
     _hudAnimationsRunning = true
   }
@@ -672,6 +763,45 @@ class StatusBarInfoView: UIView {
     } else {
       leftDataStream.isHidden = true
       rightDataStream.isHidden = true
+    }
+
+    // Drift bits — compute home positions
+    let bitYMin: CGFloat = 6
+    let bitYMax: CGFloat = max(hudHeight - 6, bitYMin + 1)
+    let leftZoneStart = hudStart + 10
+    let leftZoneEnd = midX - halfExclusion - 5
+    let rightZoneStart = midX + halfExclusion + 5
+    let rightZoneEnd = hudEnd - 10
+    let halfCount = driftBitCount / 2
+
+    for i in 0..<driftBitCount {
+      srand48(i * 7 + 31)
+      let bit = driftBitLayers[i]
+
+      let zoneStart: CGFloat
+      let zoneEnd: CGFloat
+      let zoneIndex: Int
+
+      if i < halfCount {
+        zoneStart = leftZoneStart
+        zoneEnd = leftZoneEnd
+        zoneIndex = i
+      } else {
+        zoneStart = rightZoneStart
+        zoneEnd = rightZoneEnd
+        zoneIndex = i - halfCount
+      }
+
+      let zoneWidth = zoneEnd - zoneStart
+      guard zoneWidth > 10 else { bit.isHidden = true; continue }
+      bit.isHidden = false
+
+      let segmentWidth = zoneWidth / CGFloat(halfCount)
+      let homeX = zoneStart + segmentWidth * (CGFloat(zoneIndex) + 0.5)
+                  + CGFloat(drand48()) * segmentWidth * 0.4 - segmentWidth * 0.2
+      let homeY = bitYMin + CGFloat(drand48()) * (bitYMax - bitYMin)
+
+      bit.position = CGPoint(x: homeX, y: homeY)
     }
 
     CATransaction.commit()
