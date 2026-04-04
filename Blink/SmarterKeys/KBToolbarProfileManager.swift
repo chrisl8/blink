@@ -59,8 +59,11 @@ class KBToolbarProfileManager {
     }
   }
 
+  static let activeProfileDidChangeNotification = Notification.Name("KBToolbarActiveProfileDidChange")
+
   func setActiveProfile(id: UUID) {
     activeProfileId = id
+    NotificationCenter.default.post(name: Self.activeProfileDidChangeNotification, object: nil, userInfo: ["profileId": id])
   }
 
   func save(profile: KBToolbarProfile) {
@@ -104,16 +107,10 @@ class KBToolbarProfileManager {
   }
 
   func activeProfile() -> KBToolbarProfile? {
-    if let id = activeProfileId, let profile = load(id: id) {
-      return profile
+    guard let id = activeProfileId, let profile = load(id: id) else {
+      return nil
     }
-    // Active ID is missing or points to a deleted profile — fall back to first available
-    let profiles = loadAll()
-    if let first = profiles.first {
-      activeProfileId = first.id
-      return first
-    }
-    return nil
+    return profile
   }
 
   func ensureDefaultProfile(for device: KBDevice, lang: String) {

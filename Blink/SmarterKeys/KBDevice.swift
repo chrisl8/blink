@@ -68,11 +68,10 @@ enum KBDevice {
   func layoutFor(lang: String, profile: KBToolbarProfile?) -> KBLayout {
     guard let profile = profile else { return layoutFor(lang: lang) }
     let base = layoutFor(lang: lang)
-    return KBLayout(
-      profile.leftKeys ?? base.left,
-      profile.middleKeys,
-      profile.rightKeys ?? base.right
-    )
+    let left = profile.leftKeys ?? base.left
+    let middle = profile.middleKeys
+    let right = profile.rightKeys ?? base.right
+    return KBLayout(left, middle, right)
   }
   
   func sizesFor(portrait: Bool) -> KBSizes {

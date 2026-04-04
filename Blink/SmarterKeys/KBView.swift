@@ -167,6 +167,7 @@ class KBView: UIView {
   
 
   private var _profileChangeObserver: Any?
+  private var _activeProfileChangeObserver: Any?
 
   override func didMoveToSuperview() {
     super.didMoveToSuperview()
@@ -174,7 +175,7 @@ class KBView: UIView {
       DispatchQueue.main.async { [weak self] in
         guard let self = self, self.activeProfile == nil else { return }
         let manager = KBToolbarProfileManager.shared
-        manager.ensureDefaultProfile(for: self.kbDevice, lang: self.lang)
+        // Only load an active profile if the user has explicitly set one
         self.activeProfile = manager.activeProfile()
       }
     }
@@ -190,9 +191,27 @@ class KBView: UIView {
         self.activeProfile = KBToolbarProfileManager.shared.load(id: changedId)
         self._updateSections()
       }
-    } else if superview == nil, let obs = _profileChangeObserver {
-      NotificationCenter.default.removeObserver(obs)
-      _profileChangeObserver = nil
+    }
+    if superview != nil && _activeProfileChangeObserver == nil {
+      _activeProfileChangeObserver = NotificationCenter.default.addObserver(
+        forName: KBToolbarProfileManager.activeProfileDidChangeNotification,
+        object: nil, queue: .main
+      ) { [weak self] note in
+        guard let self = self,
+              let newId = note.userInfo?["profileId"] as? UUID
+        else { return }
+        self.activeProfile = KBToolbarProfileManager.shared.load(id: newId)
+      }
+    }
+    if superview == nil {
+      if let obs = _profileChangeObserver {
+        NotificationCenter.default.removeObserver(obs)
+        _profileChangeObserver = nil
+      }
+      if let obs = _activeProfileChangeObserver {
+        NotificationCenter.default.removeObserver(obs)
+        _activeProfileChangeObserver = nil
+      }
     }
   }
 

@@ -49,14 +49,10 @@ struct KBToolbarProfile: Codable, Identifiable {
 
 extension Array where Element == KBKey {
   func normalizedForProfile() -> [KBKey] {
-    let representative = KBTraits.initial
-      .union(.portrait)
-      .subtracting(.landscape)
-
     var seen = Set<String>()
     var result: [KBKey] = []
 
-    for key in self where key.match(traits: representative) {
+    for key in self {
       let logicalId: String
       if case .arrows = key.shape {
         logicalId = "arrows"

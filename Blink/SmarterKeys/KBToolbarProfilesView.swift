@@ -84,12 +84,11 @@ struct KBToolbarProfilesView: View {
   }
 
   private func reload() {
+    // Create a default profile for editing if none exist yet
+    let device = KBDevice.detect()
+    manager.ensureDefaultProfile(for: device, lang: "")
     profiles = manager.loadAll()
     activeId = manager.activeProfileId
-    if activeId == nil, let first = profiles.first {
-      activeId = first.id
-      manager.setActiveProfile(id: first.id)
-    }
   }
 
   private func deleteProfiles(at offsets: IndexSet) {
@@ -166,7 +165,7 @@ struct KBToolbarProfileEditView: View {
       }
 
       Section("Add Middle Keys") {
-        customCharRow(char: $customMiddleChar, useFlexKey: true) { key in
+        customCharRow(char: $customMiddleChar) { key in
           middleKeys.append(key)
         }
         ForEach(middleKeyGroups) { group in
@@ -346,9 +345,7 @@ struct KBToolbarProfileEditView: View {
       .key(.down, traits: .all),
     ] + (isSide ? [.key(.tab, traits: .all), .key(.return, traits: .all)] : [])))
 
-    let textKey: (String) -> KBKey = isSide
-      ? { .key(.text(value: $0), traits: .all) }
-      : { .flexKey(.text(value: $0), traits: .all) }
+    let textKey: (String) -> KBKey = { .key(.text(value: $0), traits: .all) }
 
     groups.append(KeyGroup(id: "numbers", title: "Numbers", keys:
       (0...9).map { textKey("\($0)") }
