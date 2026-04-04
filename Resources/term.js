@@ -262,6 +262,98 @@ function _setTermCoordinates(event, x, y) {
   event.terminalColumn = tx;
 }
 
+function _getRowTextRaw(rowIdx) {
+  var node = t.getRowNode(rowIdx);
+  if (!node) return '';
+  var txt = '';
+  for (var i = 0; i < node.nodes.length; i++) txt += node.nodes[i].txt;
+  return txt;
+}
+
+function term_getUrlAtPoint(x, y) {
+  try {
+    var charH = t.scrollPort_.characterSize.height;
+    var charW = t.scrollPort_.characterSize.width;
+    if (charH <= 0 || charW <= 0) return;
+
+    var rowOffset = Math.floor(y / charH);
+    var col = Math.floor(x / charW);
+    var topRow = t.scrollPort_.getTopRowIndex();
+    var absRow = topRow + rowOffset;
+    var totalRows = t.getRowCount();
+    if (absRow < 0 || absRow >= totalRows) return;
+
+    // Get the tapped row text (trimmed)
+    var tappedRaw = _getRowTextRaw(absRow);
+    var tapped = tappedRaw.replace(/\s+$/, '');
+
+    // Extract the "word" at the tap column — the non-whitespace run
+    // containing the tapped character. This is our URL candidate seed.
+    var tapCol = Math.min(col, tapped.length);
+
+    // Expand left to find word start
+    var wordStart = tapCol;
+    while (wordStart > 0 && tapped[wordStart - 1] !== ' ') wordStart--;
+    // Expand right to find word end
+    var wordEnd = tapCol;
+    while (wordEnd < tapped.length && tapped[wordEnd] !== ' ') wordEnd++;
+
+    var urlCandidate = tapped.substring(wordStart, wordEnd);
+
+    // If the word extends to the end of the row, it may be truncated
+    // by a hard line wrap. Grab continuation from the next row(s).
+    if (wordEnd >= tapped.length) {
+      for (var fwd = 1; fwd <= 3; fwd++) {
+        if (absRow + fwd >= totalRows) break;
+        var nextRow = _getRowTextRaw(absRow + fwd).replace(/\s+$/, '');
+        // Trim leading whitespace — program may indent continuation
+        var nextTrimmed = nextRow.replace(/^\s+/, '');
+        if (nextTrimmed.length === 0) break;
+        // Grab the first non-space run from the next row
+        var spaceIdx = nextTrimmed.indexOf(' ');
+        var chunk = spaceIdx >= 0 ? nextTrimmed.substring(0, spaceIdx) : nextTrimmed;
+        urlCandidate += chunk;
+        // If this row also extends to the end, keep going
+        if (spaceIdx < 0 && nextTrimmed.length >= nextRow.replace(/\s+$/, '').replace(/^\s+/, '').length) {
+          continue;
+        }
+        break;
+      }
+    }
+
+    // If the word starts at the beginning of the row, it may be a
+    // continuation from the previous row.
+    if (wordStart === 0) {
+      for (var bwd = 1; bwd <= 3; bwd++) {
+        if (absRow - bwd < 0) break;
+        var prevRow = _getRowTextRaw(absRow - bwd).replace(/\s+$/, '');
+        if (prevRow.length === 0) break;
+        // Grab the last non-space run from the previous row
+        var lastSpace = prevRow.lastIndexOf(' ');
+        var chunk = lastSpace >= 0 ? prevRow.substring(lastSpace + 1) : prevRow;
+        // Only prepend if prev row ends at the row boundary (was truncated)
+        var prevRawTrimmed = _getRowTextRaw(absRow - bwd).replace(/\s+$/, '');
+        if (chunk.length > 0 && prevRawTrimmed.length >= charW * 0.8) {
+          urlCandidate = chunk + urlCandidate;
+        } else {
+          break;
+        }
+        // If the chunk starts at beginning of that row too, keep going
+        if (lastSpace < 0) continue;
+        break;
+      }
+    }
+
+    // Send the candidate for URL detection. Offset in the middle.
+    if (urlCandidate.length > 0) {
+      var offset = Math.floor(urlCandidate.length / 2);
+      _postMessage('openUrlAtPoint', {text: urlCandidate, offset: offset});
+    }
+  } catch (e) {
+    _postMessage('openUrlAtPoint', {debug: 'error: ' + e.message});
+  }
+}
+
 function term_reportMouseClick(x, y, buttons, display) {
   if (!t.prompt) {
     return;

@@ -38,6 +38,7 @@
 #import <AVFoundation/AVFoundation.h>
 
 #import "Blink-Swift.h"
+#import "openurl.h"
 
 NSString * TermViewReadyNotificationKey = @"TermViewReadyNotificationKey";
 NSString * TermViewBrowserReadyNotificationKey = @"TermViewBrowserReadyNotificationKey";
@@ -578,7 +579,8 @@ struct winsize __winSizeFromJSON(NSDictionary *json) {
     [[NSNotificationCenter defaultCenter] postNotificationName:TermViewBrowserReadyNotificationKey object:self];
   } else if ([operation isEqualToString:@"ring-bell"]) {
     [_device viewDidReceiveBellRing];
-    
+  } else if ([operation isEqualToString:@"openUrlAtPoint"]) {
+    [self _handleOpenUrlAtPoint:data];
   }
 }
 
@@ -753,6 +755,18 @@ struct winsize __winSizeFromJSON(NSDictionary *json) {
   return result;
 }
 
+- (void)_handleOpenUrlAtPoint:(NSDictionary *)data
+{
+  NSString *text = data[@"text"] ?: @"";
+  NSNumber *offset = data[@"offset"] ?: @0;
+  if (data[@"debug"] || text.length == 0) return;
+
+  NSDictionary *selData = @{@"base": text, @"offset": offset};
+  NSURL *url = [self _detectLinkInSelection:selData];
+  if (url) {
+    blink_openurl(url);
+  }
+}
 
 // just to remove warning in selector
 

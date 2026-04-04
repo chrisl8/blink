@@ -282,6 +282,7 @@ class UIScrollViewWithoutHitTest: UIScrollView {
           }
         } else {
           _wkWebView?.evaluateJavaScript("term_reportMouseClick(\(point.x), \(point.y), 1, \(BLKDefaults.isKeyCastsOn() ? "true" : "false"));", completionHandler: nil)
+          _wkWebView?.evaluateJavaScript("term_getUrlAtPoint(\(point.x), \(point.y));", completionHandler: nil)
         }
       }
 
