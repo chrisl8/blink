@@ -93,6 +93,7 @@ extension KBLayout {
     ],
     [
       .arrows(traits: .default - .cmdOn),
+      .icon(.hideKB, traits: .default - .cmdOff),
       .wideKey(.cmd, traits: .default + .hkb),
       .icon(.hideKB, traits: .default),
     ])

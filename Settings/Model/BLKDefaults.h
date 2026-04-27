@@ -77,8 +77,6 @@ typedef NS_ENUM(NSInteger, BKSnippetDefaultLocation) {
 @property (nonatomic) BOOL keycasts;
 @property (nonatomic) BKLayoutMode layoutMode;
 @property (nonatomic) BKOverscanCompensation overscanCompensation;
-@property (nonatomic) BOOL xCallBackURLEnabled;
-@property (nonatomic) NSString *xCallBackURLKey;
 @property (nonatomic) BOOL disableCustomKeyboards;
 @property (nonatomic) BOOL playSoundOnBell;
 @property (nonatomic) BOOL notificationOnBellUnfocused;
@@ -90,15 +88,13 @@ typedef NS_ENUM(NSInteger, BKSnippetDefaultLocation) {
 @property (nonatomic) BKSnippetDefaultLocation snippetsDefaultLocation;
 @property (nonatomic, strong) NSString *scratchLanguageMode;
 
-+ (void)loadDefaults;
-+ (BOOL)saveDefaults;
++ (void)loadDefaults NS_SWIFT_NAME(loadDefaults());
++ (BOOL)saveDefaults NS_SWIFT_NAME(save());
 + (void)setCursorBlink:(BOOL)state;
 + (void)setBoldAsBright:(BOOL)state;
 + (void)setEnableBold:(NSUInteger)state;
 + (void)setAlternateAppIcon:(BOOL)state;
 + (void)setKeycasts:(BOOL)state;
-+ (void)setXCallBackURLEnabled:(BOOL)state;
-+ (void)setXCallBackURLKey:(NSString *)key;
 + (void)setDisableCustomKeyboards:(BOOL)state;
 + (void)setFontName:(NSString *)fontName;
 + (void)setThemeName:(NSString *)themeName;
@@ -121,8 +117,6 @@ typedef NS_ENUM(NSInteger, BKSnippetDefaultLocation) {
 + (BOOL)isBoldAsBright;
 + (BOOL)isAlternateAppIcon;
 + (BOOL)isKeyCastsOn;
-+ (BOOL)isXCallBackURLEnabled;
-+ (NSString *)xCallBackURLKey;
 + (BOOL)disableCustomKeyboards;
 + (void)setDefaultUserName:(NSString*)name;
 + (void)saveGlobalSSHConfig;
@@ -146,4 +140,11 @@ typedef NS_ENUM(NSInteger, BKSnippetDefaultLocation) {
 
 
 + (void)applyExternalScreenCompensation:(BKOverscanCompensation)value;
+
+// Direct access to the raw persisted instance.
+// Used by migrators that need to read/reset legacy values.
+// At one point BKDefaults should lose its methods and the Migrators should own the structure
+// for compatibility purposes.
++ (instancetype)legacyInstance;
+
 @end

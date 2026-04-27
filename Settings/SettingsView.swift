@@ -41,7 +41,6 @@ struct SettingsView: View {
   @State private var _blinkVersion = UIApplication.blinkShortVersion() ?? ""
   @State private var _iCloudSyncOn = BKUserConfigurationManager.userSettingsValue(forKey: BKUserConfigiCloud)
   @State private var _autoLockOn = BKUserConfigurationManager.userSettingsValue(forKey: BKUserConfigAutoLock)
-  @State private var _xCallbackUrlOn = BLKDefaults.isXCallBackURLEnabled()
   @State private var _defaultUser = BLKDefaults.defaultUserName() ?? ""
   @StateObject private var _entitlements: EntitlementsManager = .shared
   @StateObject private var _model = PurchasesUserModel.shared
@@ -119,9 +118,16 @@ struct SettingsView: View {
       }
 
       Section("Terminal") {
-        RowWithStoryBoardId(content: {
-          Label("Appearance", systemImage: "paintpalette")
-        }, storyBoardId: "BKAppearanceViewController")
+        Row {
+          Label("Style", systemImage: "paintpalette")
+        } details: {
+          StyleCustomizationView()
+        }
+        Row {
+          Label("Display", systemImage: "display")
+        } details: {
+          DisplaySettingsView()
+        }
         Row {
           Label("Keyboard", systemImage: "keyboard")
         } details: {
@@ -177,13 +183,6 @@ struct SettingsView: View {
             Text(_autoLockOn ? "On" : "Off").foregroundColor(.secondary)
           }
         }, storyBoardId: "BKSecurityConfigurationViewController")
-        RowWithStoryBoardId(content: {
-          HStack {
-            Label("X Callback Url", systemImage: "link")
-            Spacer()
-            Text(_xCallbackUrlOn ? "On" : "Off").foregroundColor(.secondary)
-          }
-        }, storyBoardId: "BKXCallBackUrlConfigurationViewController")
       }
 
       Section("Get in touch") {
@@ -236,7 +235,6 @@ struct SettingsView: View {
     .onAppear {
       _iCloudSyncOn = BKUserConfigurationManager.userSettingsValue(forKey: BKUserConfigiCloud)
       _autoLockOn = BKUserConfigurationManager.userSettingsValue(forKey: BKUserConfigAutoLock)
-      _xCallbackUrlOn = BLKDefaults.isXCallBackURLEnabled()
       _defaultUser = BLKDefaults.defaultUserName() ?? ""
 
     }

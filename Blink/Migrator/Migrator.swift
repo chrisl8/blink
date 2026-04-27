@@ -37,7 +37,9 @@ import Foundation
   @objc static func perform() {
     Self.perform(steps: [MigrationToAppGroup(),
                          MigrationAddSnippetsShortcut(),
-                         MigrationFileProviderReplicatedExtension()
+                         MigrationFileProviderReplicatedExtension(),
+                         MigrationStyleFromDefaults(),
+                         MigrationWipeSessionRegistry()
                         ])
   }
 

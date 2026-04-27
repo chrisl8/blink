@@ -209,6 +209,10 @@ import Combine
   }
 
   override var inputAccessoryView: UIView? {
+    if isHardwareKB {
+      return nil
+    }
+    
     return _inputAccessoryView
   }
 

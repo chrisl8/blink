@@ -34,7 +34,8 @@
 #import "UIDevice+DeviceName.h"
 #import "BlinkPaths.h"
 #import "DeviceInfo.h"
-#import "LayoutManager.h"
+#import "Blink-Swift.h"
+#import "LayoutConstraintManager.h"
 
 
 BLKDefaults *defaults;
@@ -88,8 +89,6 @@ NSString *const BKAppearanceChanged = @"BKAppearanceChanged";
   if ([coder containsValueForKey:@"overscanCompensation"]) {
     _overscanCompensation = (BKOverscanCompensation)[coder decodeIntegerForKey:@"overscanCompensation"];
   }
-  _xCallBackURLEnabled = [coder decodeBoolForKey:@"xCallBackURLEnabled"];
-  _xCallBackURLKey = [coder decodeObjectOfClasses:strings forKey:@"xCallBackURLKey"];
   _disableCustomKeyboards = [coder decodeBoolForKey:@"disableCustomKeyboards"];
   _playSoundOnBell = [coder decodeBoolForKey:@"playSoundOnBell"];
   _notificationOnBellUnfocused = [coder decodeBoolForKey:@"notificationOnBellUnfocused"];
@@ -121,8 +120,6 @@ NSString *const BKAppearanceChanged = @"BKAppearanceChanged";
   [encoder encodeBool:_alternateAppIcon forKey:@"alternateAppIcon"];
   [encoder encodeInteger:_layoutMode forKey:@"layoutMode"];
   [encoder encodeInteger:_overscanCompensation forKey:@"overscanCompensation"];
-  [encoder encodeBool:_xCallBackURLEnabled forKey:@"xCallBackURLEnabled"];
-  [encoder encodeObject:_xCallBackURLKey forKey:@"xCallBackURLKey"];
   [encoder encodeBool:_disableCustomKeyboards forKey:@"disableCustomKeyboards"];
   [encoder encodeBool:_playSoundOnBell forKey:@"playSoundOnBell"];
   [encoder encodeBool:_notificationOnBellUnfocused forKey:@"notificationOnBellUnfocused"];
@@ -205,7 +202,7 @@ NSString *const BKAppearanceChanged = @"BKAppearanceChanged";
   }
   
   if (defaults.layoutMode == BKLayoutModeDefault) {
-    defaults.layoutMode = [LayoutManager deviceDefaultLayoutMode];
+    defaults.layoutMode = [LayoutConstraintManager deviceDefaultLayoutMode];
   }
 
   if (!defaults.fontName) {
@@ -245,12 +242,12 @@ NSString *const BKAppearanceChanged = @"BKAppearanceChanged";
 
 + (void)setCursorBlink:(BOOL)state
 {
-  defaults.cursorBlink = state;
+  [TerminalStyleStore.shared setStyleCursorBlink:state];
 }
 
 + (void)setBoldAsBright:(BOOL)state
 {
-  defaults.boldAsBright = state;
+  [TerminalStyleStore.shared setStyleBoldAsBright:state];
 }
 
 + (void)setAlternateAppIcon:(BOOL)state
@@ -264,22 +261,22 @@ NSString *const BKAppearanceChanged = @"BKAppearanceChanged";
 
 + (void)setEnableBold:(NSUInteger)state
 {
-  defaults.enableBold = state;
+  [TerminalStyleStore.shared setStyleEnableBold:state];
 }
 
 + (void)setFontName:(NSString *)fontName
 {
-  defaults.fontName = fontName;
+  [TerminalStyleStore.shared setStyleFontName:fontName];
 }
 
 + (void)setThemeName:(NSString *)themeName
 {
-  defaults.themeName = themeName;
+  [TerminalStyleStore.shared setStyleThemeName:themeName];
 }
 
 + (void)setFontSize:(NSNumber *)fontSize
 {
-  defaults.fontSize = fontSize;
+  [TerminalStyleStore.shared setStyleFontSize:fontSize];
 }
 
 + (void)setExternalDisplayFontSize:(NSNumber *)fontSize
@@ -310,16 +307,8 @@ NSString *const BKAppearanceChanged = @"BKAppearanceChanged";
   defaults.keyboardStyle = value;
 }
 
-+ (void)setXCallBackURLEnabled:(BOOL)value {
-  defaults.xCallBackURLEnabled = value;
-}
-
 + (void)setDisableCustomKeyboards:(BOOL)state {
   defaults.disableCustomKeyboards = state;
-}
-
-+ (void)setXCallBackURLKey:(NSString *)key {
-  defaults.xCallBackURLKey = key;
 }
 
 + (void)setPlaySoundOnBell:(BOOL)state {
@@ -357,16 +346,16 @@ NSString *const BKAppearanceChanged = @"BKAppearanceChanged";
 
 + (NSString *)selectedFontName
 {
-  return defaults.fontName;
+  return TerminalStyleStore.shared.bridgedFontName;
 }
 + (NSString *)selectedThemeName
 {
-  return defaults.themeName;
+  return TerminalStyleStore.shared.bridgedThemeName;
 }
 
 + (NSNumber *)selectedFontSize
 {
-  return defaults.fontSize;
+  return TerminalStyleStore.shared.bridgedFontSize;
 }
 
 + (NSNumber *)selectedExternalDisplayFontSize
@@ -376,17 +365,17 @@ NSString *const BKAppearanceChanged = @"BKAppearanceChanged";
 
 + (BOOL)isCursorBlink
 {
-  return defaults.cursorBlink;
+  return TerminalStyleStore.shared.bridgedCursorBlink;
 }
 
 + (NSUInteger)enableBold
 {
-  return defaults.enableBold;
+  return TerminalStyleStore.shared.bridgedEnableBold;
 }
 
 + (BOOL)isBoldAsBright
 {
-  return defaults.boldAsBright;
+  return TerminalStyleStore.shared.bridgedBoldAsBright;
 }
 
 + (BOOL)isAlternateAppIcon
@@ -416,16 +405,6 @@ NSString *const BKAppearanceChanged = @"BKAppearanceChanged";
 
 + (BKKeyboardStyle)keyboardStyle {
   return defaults.keyboardStyle;
-}
-
-+ (BOOL)isXCallBackURLEnabled
-{
-  return defaults.xCallBackURLEnabled;
-}
-
-+ (NSString *)xCallBackURLKey
-{
-  return defaults.xCallBackURLKey;
 }
 
 + (BOOL)disableCustomKeyboards {
@@ -496,5 +475,7 @@ NSString *const BKAppearanceChanged = @"BKAppearanceChanged";
   
   
 }
+
++ (instancetype)legacyInstance { return defaults; }
 
 @end

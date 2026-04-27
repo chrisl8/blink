@@ -39,7 +39,7 @@ import SwiftUI
 
 
 // MARK: UIViewController
-class SpaceController: UIViewController, LayoutInsetsProvider {
+class SpaceController: UIViewController {
   
   struct UIState: UserActivityCodable {
     var keys: [UUID] = []
@@ -124,11 +124,6 @@ class SpaceController: UIViewController, LayoutInsetsProvider {
       }
     }
   }
-
-  // UIKeyboardLayoutGuide Integration
-  private var keyboardLayoutGuide: UIKeyboardLayoutGuide?
-  private var overlayBottomConstraint: NSLayoutConstraint?
-  private var _lastKnownKeyboardHeight: CGFloat = 0
   
   var safeFrame: CGRect {
     _overlay.frame
@@ -143,13 +138,6 @@ class SpaceController: UIViewController, LayoutInsetsProvider {
     }
     
     _snippetsVC?.view.frame = _overlay.frame
-    
-    // Keyboard Height Detection
-    let currentKeyboardHeight = keyboardLayoutGuide?.layoutFrame.height ?? 0
-    if currentKeyboardHeight != _lastKnownKeyboardHeight {
-      _lastKnownKeyboardHeight = currentKeyboardHeight
-      NotificationCenter.default.post(name: NSNotification.Name(rawValue: LayoutManagerBottomInsetDidUpdate), object: nil)
-    }
     
     if let menu = _blinkMenu {
       let size = _overlay.frame.size;
@@ -223,44 +211,17 @@ class SpaceController: UIViewController, LayoutInsetsProvider {
     #endif
   }
   
-  @objc func _relayout() {
-    guard
-      let window = view.window,
-      window.screen === UIScreen.main
-    else {
-      return
-    }
+  private func setupOverlayConstraints() {
+    // Overlay positioning to wrap safe areas and keyboard.
+    let keyboardGuide = view.keyboardLayoutGuide
     
-    view.setNeedsLayout()
-  }
-  
-  @objc public func bottomInset() -> CGFloat {
-    // LayoutManager.buildSafeInsets() calls this to get keyboard height
-    // Read directly from UIKeyboardLayoutGuide layoutFrame for real-time accuracy
-    let height = keyboardLayoutGuide?.layoutFrame.height ?? 0
-    return height
-  }
-  
-  // MARK: - LayoutInsetsProvider
-  func provideInsets(for controller: TermController) -> UIEdgeInsets {
-    let layoutMode = BKLayoutMode(rawValue: controller.sessionParams.layoutMode) ?? BKLayoutMode.default
-    return LayoutManager.buildSafeInsets(for: self, andMode: layoutMode)
-  }
-  
-  private func setupKeyboardLayoutGuide() {
-    guard keyboardLayoutGuide == nil else { return }
-    
-    keyboardLayoutGuide = view.keyboardLayoutGuide
-    
-    // Setup overlay constraints
     _overlay.translatesAutoresizingMaskIntoConstraints = false
-    overlayBottomConstraint = _overlay.bottomAnchor.constraint(equalTo: keyboardLayoutGuide!.topAnchor)
-    
+
     NSLayoutConstraint.activate([
       _overlay.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-      _overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      _overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      overlayBottomConstraint!
+      _overlay.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+      _overlay.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+      _overlay.bottomAnchor.constraint(equalTo: keyboardGuide.topAnchor)
     ])
   }
   
@@ -309,21 +270,18 @@ class SpaceController: UIViewController, LayoutInsetsProvider {
     
     _registerForNotifications()
     
-    // Setup UIKeyboardLayoutGuide
-    setupKeyboardLayoutGuide()
+    setupOverlayConstraints()
     
     if _viewportsKeys.isEmpty {
-      _createShell(userActivity: nil, animated: false)
+      _newShellAction(animated: false)
     } else if let key = _currentKey {
       let term: TermController = SessionRegistry.shared[key]
       term.delegate = self
-      term.layoutProvider = self
+      // term.layoutProvider = self
       term.bgColor = view.backgroundColor ?? .black
       _viewportsController.setViewControllers([term], direction: .forward, animated: false)
     }
-    
-    // KBObserver interaction removed - using UIKeyboardLayoutGuide instead
-    
+        
     self.view.addSubview(_bottomTapAreaView)
 
     #if !targetEnvironment(macCatalyst)
@@ -376,26 +334,16 @@ Please go to your subscriptions and cancel one of them!
     
     nc.addObserver(self, selector:#selector(_didBecomeKeyWindow), name: UIApplication.didBecomeActiveNotification, object: nil)
     
-    // LayoutManagerBottomInsetDidUpdate coordinates layout between SpaceController and TermController
-    // Triggered by: UIKeyboardLayoutGuide changes, orientation changes, layout mode changes, scene transitions
-    nc.addObserver(self, selector: #selector(_relayout),
-                   name: NSNotification.Name(rawValue: LayoutManagerBottomInsetDidUpdate),
-                   object: nil)
-    
     nc.addObserver(self, selector: #selector(_setupAppearance),
                    name: NSNotification.Name(rawValue: BKAppearanceChanged),
                    object: nil)
-    
-    
-    
-    
     
     nc.addObserver(self, selector: #selector(_UISceneDidEnterBackgroundNotification(_:)),
                    name: UIScene.didEnterBackgroundNotification, object: nil)
     
     nc.addObserver(self, selector: #selector(_UISceneWillEnterForegroundNotification(_:)),
                    name: UIScene.willEnterForegroundNotification, object: nil)
-    
+
   }
                    
   @objc func _UISceneDidEnterBackgroundNotification(_ n: Notification) {
@@ -449,9 +397,6 @@ Please go to your subscriptions and cancel one of them!
     }
    
     currentTerm()?.resumeIfNeeded()
-    
-    // Scene changes (external display, etc.) need to trigger layout updates
-    NotificationCenter.default.post(name: NSNotification.Name(rawValue: LayoutManagerBottomInsetDidUpdate), object: nil)
    
     #if targetEnvironment(macCatalyst)
     #else
@@ -474,14 +419,15 @@ Please go to your subscriptions and cancel one of them!
     _focusOnShell()
   }
   
-  func _createShell(
+  func _createTerminal(
     userActivity: NSUserActivity?,
     animated: Bool,
+    sessionPayload: TermSessionPayload,
     completion: ((Bool) -> Void)? = nil)
   {
-    let term = TermController(sceneRole: sceneRole)
+    let term = TermController(sceneRole: sceneRole, sessionPayload: sessionPayload)
     term.delegate = self
-    term.layoutProvider = self
+    //term.layoutProvider = self
     term.userActivity = userActivity
     term.bgColor = view.backgroundColor ?? .black
     
@@ -521,7 +467,7 @@ Please go to your subscriptions and cancel one of them!
     _sessionStartTimes.removeValue(forKey: currentKey)
     _viewportsKeys.remove(at: idx)
     if _viewportsKeys.isEmpty {
-      _createShell(userActivity: nil, animated: true)
+      _newShellAction(animated: false)
       return
     }
 
@@ -578,8 +524,6 @@ Please go to your subscriptions and cancel one of them!
       return
     }
     
-    let params = term.sessionParams
-    
     if let bgColor = term.view.backgroundColor, bgColor != .clear {
       view.backgroundColor = bgColor
       _viewportsController.view.backgroundColor = bgColor
@@ -606,11 +550,11 @@ Please go to your subscriptions and cancel one of them!
     
     var sceneTitle = "[\(pageNum == nil ? 1 : pageNum! + 1) of \(_viewportsKeys.count)] \(title ?? "blink")"
     
-    if params.rows == 0 && params.cols == 0 {
+    if term.termView.rows == 0 && term.termView.cols == 0 {
       hud.label.numberOfLines = 1
       hud.label.text = title ?? "blink"
     } else {
-      let geometry = "\(params.cols)×\(params.rows)"
+      let geometry = "\(term.termView.cols)×\(term.termView.rows)"
       hud.label.numberOfLines = 2
       hud.label.text = "\(title ?? "blink")\n\(geometry)"
       
@@ -638,7 +582,7 @@ Please go to your subscriptions and cancel one of them!
     let pageNum = _viewportsKeys.firstIndex(of: term.meta.key)
     let windowIndex = (pageNum ?? 0) + 1
     let windowCount = _viewportsKeys.count
-    let title = term.termDevice.view?.title
+    let title = term.termView.title
     _lastPolledTitle = title
 
     _statusBarInfoView.update(
@@ -730,7 +674,7 @@ extension SpaceController: UIPageViewControllerDataSource {
     let newKey = _viewportsKeys[idx]
     let newCtrl: TermController = SessionRegistry.shared[newKey]
     newCtrl.delegate = self
-    newCtrl.layoutProvider = self
+    //newCtrl.layoutProvider = self
     newCtrl.bgColor = view.backgroundColor ?? .black
     return newCtrl
   }
@@ -853,7 +797,7 @@ extension SpaceController {
     case .tabClose: _closeCurrentSpace()
     case .tabMoveToOtherWindow: _moveToOtherWindowAction()
     case .toggleKeyCast: _toggleKeyCast()
-    case .tabNew: newShellAction()
+    case .tabNew: _newShellAction()
     case .tabNext: _advanceShell(by: 1)
     case .tabPrev: _advanceShell(by: -1)
     case .tabNextCycling: _advanceShellCycling(by: 1)
@@ -868,9 +812,9 @@ extension SpaceController {
     case .selectionGoogle: KBTracker.shared.input?.googleSelection(self)
     case .selectionStackOverflow: KBTracker.shared.input?.soSelection(self)
     case .selectionShare: KBTracker.shared.input?.shareSelection(self)
-    case .zoomIn: currentTerm()?.termDevice.view?.increaseFontSize()
-    case .zoomOut: currentTerm()?.termDevice.view?.decreaseFontSize()
-    case .zoomReset: currentTerm()?.termDevice.view?.resetFontSize()
+    case .zoomIn: currentTerm()?.termView.increaseFontSize()
+    case .zoomOut: currentTerm()?.termView.decreaseFontSize()
+    case .zoomReset: currentTerm()?.termView.resetFontSize()
     case .hideKeyboard:
       if let input = KBTracker.shared.input {
         if input.isRealFirstResponder {
@@ -892,10 +836,19 @@ extension SpaceController {
     currentTerm()?.scaleWithPich(pinch)
   }
   
-  @objc func newShellAction() {
-    _createShell(userActivity: nil, animated: true)
+  private func _newShellAction(command: String = "", animated: Bool = true) {
+    let params = MCPParams()
+    if !command.isEmpty {
+      params.initialCommand = command
+    }
+    let payload = MCPSessionPayload(params: params)
+    _createTerminal(userActivity: nil, animated: animated, sessionPayload: payload)
   }
-  
+
+  @objc func newShellAction() {
+    _newShellAction()
+  }
+
   @objc func closeShellAction() {
     _closeCurrentSpace()
   }
@@ -909,7 +862,7 @@ extension SpaceController {
       let session = view.window?.windowScene?.session,
       let idx = sessions.firstIndex(of: session)?.advanced(by: 1)
     else  {
-      if currentTerm()?.termDevice.view?.isFocused() == true {
+      if currentTerm()?.termView.isFocused() == true {
         currentTerm()?.resignInput()
       } else {
         _focusOnShell()
@@ -1330,6 +1283,7 @@ extension SpaceController: SnippetContext {
     do {
       self.view.window?.makeKeyAndVisible()
       let ctrl = try SnippetsViewController.create(context: receiver, transitionFrame: _blinkMenu?.bounds)
+      ctrl.pendingOpenScratch = openScratch
       DispatchQueue.main.async {
         ctrl.view.frame = self.view.bounds
         ctrl.willMove(toParent: self)
@@ -1338,11 +1292,6 @@ extension SpaceController: SnippetContext {
         ctrl.didMove(toParent: self)
         self._snippetsVC = ctrl
         self._isSnipsInputModeActive = true
-
-        // Open scratch immediately
-        if openScratch {
-          ctrl.model.openScratch()
-        }
       }
     } catch {
       self.showAlert(msg: "Could not display Snips: \(error)")
@@ -1375,6 +1324,16 @@ extension SpaceController: SnippetContext {
   func providerSnippetReceiver() -> (any SnippetReceiver)? {
     self.focusOnShellAction()
     return self.currentDevice
+  }
+
+}
+
+// MARK: SceneIntent handlers
+extension SpaceController {
+  @objc func runShellSessionIntent(command: String = "") {
+    DispatchQueue.main.sync {
+      self._newShellAction(command: command)
+    }
   }
 
 }
