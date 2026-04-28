@@ -606,6 +606,10 @@ Please go to your subscriptions and cancel one of them!
 // MARK: UIStateRestorable
 extension SpaceController: UIStateRestorable {
   func restore(withState state: UIState) {
+    _ = SessionRegistry.shared
+    if SessionRegistry.didClearForNewDeploy {
+      return
+    }
     _viewportsKeys = state.keys
     _currentKey = state.currentKey
     if let bgColor = UIColor(codableColor: state.bgColor) {

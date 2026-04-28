@@ -63,6 +63,8 @@ protocol SuspendableSession: class {
 
   private static let _binaryMtimeKey = "BlinkSessionBinaryMtime"
 
+  static var didClearForNewDeploy: Bool = false
+
   private func _clearSessionsIfNewDeploy() {
     guard let execURL = Bundle.main.executableURL,
           let attrs = try? FileManager.default.attributesOfItem(atPath: execURL.path),
@@ -73,10 +75,14 @@ protocol SuspendableSession: class {
     let savedMtime = defaults.object(forKey: Self._binaryMtimeKey) as? Date
 
     if savedMtime != currentMtime {
+      let count = _metaIndex.count
       for key in _metaIndex.keys {
         _fsRemove(forKey: key)
       }
-      debugPrint("SessionRegistry: new binary detected, cleared \(_metaIndex.count) session state files")
+      _metaIndex.removeAll()
+      _fsWriteMetaIndex()
+      Self.didClearForNewDeploy = true
+      debugPrint("SessionRegistry: new binary detected, cleared \(count) session state files")
     }
 
     defaults.set(currentMtime, forKey: Self._binaryMtimeKey)
