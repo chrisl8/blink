@@ -63,6 +63,7 @@ public func blink_ssh_main(argc: Int32, argv: Argv) -> Int32 {
   var connectionCancellable: AnyCancellable?
   let currentRunLoop = RunLoop.current
   var command: SSHCommand?
+  @objc public var currentHostAlias: String? { command?.hostAlias }
   var stream: SSH.Stream?
   var connection: SSH.SSHClient?
   var forwardTunnels: [PortForwardInfo] = []

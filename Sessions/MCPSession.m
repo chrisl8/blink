@@ -265,6 +265,18 @@
   });
 }
 
+- (NSString *)currentHostAlias {
+  __block NSString *alias = nil;
+  dispatch_sync(_sshQueue, ^(void) {
+    if (_sshClients.count == 0) { return; }
+    id client = [_sshClients lastObject];
+    if ([client respondsToSelector:@selector(currentHostAlias)]) {
+      alias = [client currentHostAlias];
+    }
+  });
+  return alias;
+}
+
 - (bool)isRunningCmd {
   return _childSession != nil || _currentCmd != nil || _currentCmdLine != nil;
 }

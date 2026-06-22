@@ -47,6 +47,7 @@
 
 - (void)registerSSHClient:(id __weak)sshClient;
 - (void)unregisterSSHClient:(id __weak)sshClient;
+- (NSString *)currentHostAlias;
 
 - (void)enqueueCommand:(NSString *)cmd;
 - (void)enqueueCommand:(NSString *)cmd skipHistoryRecord: (BOOL) skipHistoryRecord;

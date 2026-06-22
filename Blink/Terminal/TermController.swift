@@ -285,6 +285,10 @@ class TermController: UIViewController {
     return (_session as? MCPSession)?.isRunningCmd() ?? false
   }
 
+  @objc public func currentHostAlias() -> String? {
+    return (_session as? MCPSession)?.currentHostAlias()
+  }
+
   @objc public func scaleWithPich(_ pinch: UIPinchGestureRecognizer) {
     // Block font resize when layout is locked
     guard !_termView.termUIState.layoutLocked else {

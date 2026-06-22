@@ -30,8 +30,11 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 import UIKit
+import Network
 
 class StatusBarInfoView: UIView {
+
+  // MARK: - First-line views
 
   private let leftLabel = UILabel()
   private let rightLabel = UILabel()
@@ -41,6 +44,7 @@ class StatusBarInfoView: UIView {
   private let dotSize: CGFloat = 6
 
   private var _clockTimer: Timer?
+  private var _chipTimer: Timer?
   private var _sessionStartTime: Date?
   private var _isRunningCmd: Bool = false
   private var _isLightBg: Bool = false
@@ -51,35 +55,39 @@ class StatusBarInfoView: UIView {
     return f
   }()
 
+  private lazy var _dateFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "MM/dd"
+    return f
+  }()
+
   // Cached state for rebuilding attributed strings on clock tick
   private var _windowIndex: Int = 0
   private var _windowCount: Int = 0
   private var _parsedUser: String?
   private var _parsedHost: String?
   private var _rawTitle: String?
+  private var _hostAlias: String?
 
-  // HUD decoration layers
-  private let hudContainerLayer = CALayer()
-  private let frameLinesLayer = CAShapeLayer()
-  private let tickMarksLayer = CAShapeLayer()
-  private let bracketMarkersLayer = CAShapeLayer()
-  private let leftScanLine = CAGradientLayer()
-  private let rightScanLine = CAGradientLayer()
-  private let leftDataStream = CAReplicatorLayer()
-  private let rightDataStream = CAReplicatorLayer()
-  private let leftDotTemplate = CALayer()
-  private let rightDotTemplate = CALayer()
+  // First-line change tracking (for animations)
+  private var _prevWindowIndex: Int = -1
+  private var _prevWindowCount: Int = -1
+  private var _prevHostDisplay: String = ""
+  private var _prevMinute: Int = -1
 
-  // Semi-stationary telemetry drift bits
-  private var driftBitLayers: [CALayer] = []
-  private let driftBitCount = 10
-  private let driftBitSize: CGFloat = 4.0
-  private let driftBitJitterRadius: CGFloat = 3.0
+  // MARK: - Status chips
 
-  // Track center exclusion for HUD animations
-  private var _centerExclusion: CGFloat = 0
-  private var _lastLayoutSize: CGSize = .zero
-  private var _hudAnimationsRunning = false
+  private enum ChipKind: Int, CaseIterable {
+    case battery, network, memory, thermal, sysUptime, date
+  }
+
+  private var chipLabels: [ChipKind: UILabel] = [:]
+  private var chipValues: [ChipKind: String] = [:]
+  private var chipSeverity: [ChipKind: Int] = [:]
+
+  private let netMonitor = NWPathMonitor()
+  private var netStatusString: String = "..."
+  private var netStatusSeverity: Int = 0
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -107,67 +115,25 @@ class StatusBarInfoView: UIView {
     statusDot.layer.cornerRadius = dotSize / 2
     statusDot.backgroundColor = UIColor(red: 0.2, green: 0.9, blue: 0.4, alpha: 1.0)
 
-    // HUD container — behind all subviews
-    hudContainerLayer.masksToBounds = true
-    layer.addSublayer(hudContainerLayer)
-
-    // Static shape layers
-    frameLinesLayer.fillColor = nil
-    frameLinesLayer.lineWidth = 1.0
-    hudContainerLayer.addSublayer(frameLinesLayer)
-
-    tickMarksLayer.fillColor = nil
-    tickMarksLayer.lineWidth = 1.0
-    hudContainerLayer.addSublayer(tickMarksLayer)
-
-    bracketMarkersLayer.fillColor = nil
-    bracketMarkersLayer.lineWidth = 1.0
-    bracketMarkersLayer.lineCap = .square
-    hudContainerLayer.addSublayer(bracketMarkersLayer)
-
-    // Scan lines — gradient layers
-    let scanLineHeight: CGFloat = 2
-    let scanLineWidth: CGFloat = 60
-    for scanLine in [leftScanLine, rightScanLine] {
-      scanLine.bounds = CGRect(x: 0, y: 0, width: scanLineWidth, height: scanLineHeight)
-      scanLine.startPoint = CGPoint(x: 0, y: 0.5)
-      scanLine.endPoint = CGPoint(x: 1, y: 0.5)
-      scanLine.locations = [0, 0.3, 0.7, 1.0] as [NSNumber]
-      hudContainerLayer.addSublayer(scanLine)
-    }
-
-    // Data stream replicators
-    let dotSpacing: CGFloat = 6
-    let dotDiameter: CGFloat = 2.5
-
-    leftDotTemplate.bounds = CGRect(x: 0, y: 0, width: dotDiameter, height: dotDiameter)
-    leftDotTemplate.cornerRadius = dotDiameter / 2
-    leftDataStream.instanceTransform = CATransform3DMakeTranslation(dotSpacing, 0, 0)
-    leftDataStream.masksToBounds = true
-    leftDataStream.addSublayer(leftDotTemplate)
-    hudContainerLayer.addSublayer(leftDataStream)
-
-    rightDotTemplate.bounds = CGRect(x: 0, y: 0, width: dotDiameter, height: dotDiameter)
-    rightDotTemplate.cornerRadius = dotDiameter / 2
-    rightDataStream.instanceTransform = CATransform3DMakeTranslation(-dotSpacing, 0, 0)
-    rightDataStream.masksToBounds = true
-    rightDataStream.addSublayer(rightDotTemplate)
-    hudContainerLayer.addSublayer(rightDataStream)
-
-    // Drift bits — tiny diamond indicators
-    for _ in 0..<driftBitCount {
-      let bit = CALayer()
-      bit.bounds = CGRect(x: 0, y: 0, width: driftBitSize, height: driftBitSize)
-      bit.transform = CATransform3DMakeRotation(.pi / 4, 0, 0, 1)
-      hudContainerLayer.addSublayer(bit)
-      driftBitLayers.append(bit)
-    }
-
     addSubview(statusDot)
     addSubview(leftLabel)
     addSubview(rightLabel)
 
-    _updateHUDColors()
+    // Build chip labels
+    let chipFont = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+    for kind in ChipKind.allCases {
+      let l = UILabel()
+      l.font = chipFont
+      l.textAlignment = .center
+      l.lineBreakMode = .byClipping
+      l.text = " "
+      addSubview(l)
+      chipLabels[kind] = l
+      chipValues[kind] = ""
+      chipSeverity[kind] = 0
+    }
+
+    UIDevice.current.isBatteryMonitoringEnabled = true
 
     NotificationCenter.default.addObserver(
       self, selector: #selector(_appWillEnterForeground),
@@ -175,10 +141,26 @@ class StatusBarInfoView: UIView {
     NotificationCenter.default.addObserver(
       self, selector: #selector(_appDidEnterBackground),
       name: UIApplication.didEnterBackgroundNotification, object: nil)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(_chipEventNotification),
+      name: UIDevice.batteryStateDidChangeNotification, object: nil)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(_chipEventNotification),
+      name: UIDevice.batteryLevelDidChangeNotification, object: nil)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(_chipEventNotification),
+      name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(_chipEventNotification),
+      name: Notification.Name.NSProcessInfoPowerStateDidChange, object: nil)
+
+    _startNetworkMonitor()
   }
 
   deinit {
     _clockTimer?.invalidate()
+    _chipTimer?.invalidate()
+    netMonitor.cancel()
     NotificationCenter.default.removeObserver(self)
   }
 
@@ -186,37 +168,49 @@ class StatusBarInfoView: UIView {
     super.willMove(toSuperview: newSuperview)
     if newSuperview != nil {
       _startClockTimer()
+      _startChipTimer()
       _startPulseAnimation()
-      _startHUDAnimations()
+      _refreshChips(animate: false)
+      _startChipBaselineAnimation()
     } else {
-      _clockTimer?.invalidate()
-      _clockTimer = nil
-      _hudAnimationsRunning = false
+      _clockTimer?.invalidate(); _clockTimer = nil
+      _chipTimer?.invalidate(); _chipTimer = nil
     }
   }
 
   @objc private func _appWillEnterForeground() {
     _startClockTimer()
+    _startChipTimer()
     _startPulseAnimation()
-    _startHUDAnimations()
+    _refreshChips(animate: false)
+    _startChipBaselineAnimation()
     _rebuildLabels()
   }
 
   @objc private func _appDidEnterBackground() {
-    _clockTimer?.invalidate()
-    _clockTimer = nil
-    _hudAnimationsRunning = false
+    _clockTimer?.invalidate(); _clockTimer = nil
+    _chipTimer?.invalidate(); _chipTimer = nil
+  }
+
+  @objc private func _chipEventNotification() {
+    DispatchQueue.main.async { [weak self] in
+      self?._refreshChips(animate: true)
+    }
   }
 
   // MARK: - Public
 
   func update(windowIndex: Int, windowCount: Int, title: String?,
-              bgColor: UIColor?, isRunningCmd: Bool, sessionStartTime: Date?) {
-    _isLightBg = bgColor?.isLight ?? false
+              bgColor: UIColor?, isRunningCmd: Bool, sessionStartTime: Date?,
+              hostAlias: String?) {
+    let newLight = bgColor?.isLight ?? false
+    let bgChanged = (_isLightBg != newLight)
+    _isLightBg = newLight
     _windowIndex = windowIndex
     _windowCount = windowCount
     _isRunningCmd = isRunningCmd
     _sessionStartTime = sessionStartTime
+    _hostAlias = (hostAlias?.isEmpty ?? true) ? nil : hostAlias
 
     let (user, host) = _parseTitleComponents(title)
     _parsedUser = user
@@ -224,101 +218,99 @@ class StatusBarInfoView: UIView {
     _rawTitle = title
 
     _updatePulseSpeed()
-    _updateHUDColors()
     _rebuildLabels()
+    // On bg change, recolor without firing change-pulses
+    _refreshChips(animate: !bgChanged)
     setNeedsLayout()
   }
 
-  // MARK: - Color Palette
+  // MARK: - First-line color palette
 
   private var _primaryColor: UIColor {
     _isLightBg
-      ? UIColor.black.withAlphaComponent(0.55)
-      : UIColor.white.withAlphaComponent(0.6)
-  }
-
-  private var _accentColor: UIColor {
-    _isLightBg
-      ? UIColor(red: 0.0, green: 0.45, blue: 0.65, alpha: 0.8)
-      : UIColor(red: 0.3, green: 0.85, blue: 1.0, alpha: 0.85)
+      ? UIColor.black.withAlphaComponent(0.6)
+      : UIColor.white.withAlphaComponent(0.65)
   }
 
   private var _dimColor: UIColor {
     _isLightBg
-      ? UIColor.black.withAlphaComponent(0.25)
-      : UIColor.white.withAlphaComponent(0.3)
+      ? UIColor.black.withAlphaComponent(0.28)
+      : UIColor.white.withAlphaComponent(0.32)
   }
 
-  private var _hudCyanColor: UIColor {
+  private var _cyanColor: UIColor {
     _isLightBg
-      ? UIColor(red: 0.0, green: 0.48, blue: 0.55, alpha: 0.65)
-      : UIColor(red: 0.3, green: 0.85, blue: 0.91, alpha: 0.60)
+      ? UIColor(red: 0.0, green: 0.45, blue: 0.65, alpha: 0.85)
+      : UIColor(red: 0.35, green: 0.85, blue: 1.0, alpha: 0.9)
   }
 
-  private var _hudAmberColor: UIColor {
+  private var _greenColor: UIColor {
     _isLightBg
-      ? UIColor(red: 0.7, green: 0.45, blue: 0.0, alpha: 0.55)
-      : UIColor(red: 1.0, green: 0.7, blue: 0.2, alpha: 0.50)
+      ? UIColor(red: 0.05, green: 0.5, blue: 0.2, alpha: 0.85)
+      : UIColor(red: 0.4, green: 0.95, blue: 0.55, alpha: 0.85)
   }
 
-  private var _hudPurpleColor: UIColor {
+  private var _amberColor: UIColor {
     _isLightBg
-      ? UIColor(red: 0.45, green: 0.15, blue: 0.6, alpha: 0.55)
-      : UIColor(red: 0.7, green: 0.4, blue: 1.0, alpha: 0.50)
+      ? UIColor(red: 0.65, green: 0.4, blue: 0.0, alpha: 0.85)
+      : UIColor(red: 1.0, green: 0.75, blue: 0.3, alpha: 0.85)
   }
 
-  private var _hudGreenColor: UIColor {
+  private var _purpleColor: UIColor {
     _isLightBg
-      ? UIColor(red: 0.1, green: 0.48, blue: 0.2, alpha: 0.50)
-      : UIColor(red: 0.2, green: 0.9, blue: 0.4, alpha: 0.45)
+      ? UIColor(red: 0.5, green: 0.2, blue: 0.6, alpha: 0.85)
+      : UIColor(red: 0.85, green: 0.6, blue: 1.0, alpha: 0.85)
   }
 
-  private var _hudFrameColor: UIColor {
-    _isLightBg
-      ? UIColor.black.withAlphaComponent(0.25)
-      : UIColor.white.withAlphaComponent(0.25)
-  }
+  // MARK: - Chip color palette
 
-  // MARK: - HUD Colors
+  private func _chipColor(_ kind: ChipKind, severity: Int) -> UIColor {
+    switch severity {
+    case 1:
+      return _isLightBg
+        ? UIColor(red: 0.7, green: 0.45, blue: 0.0, alpha: 0.95)
+        : UIColor(red: 1.0, green: 0.78, blue: 0.25, alpha: 0.95)
+    case 2:
+      return _isLightBg
+        ? UIColor(red: 0.78, green: 0.15, blue: 0.15, alpha: 0.95)
+        : UIColor(red: 1.0, green: 0.42, blue: 0.42, alpha: 0.95)
+    default:
+      break
+    }
 
-  private func _updateHUDColors() {
-    let frameColor = _hudFrameColor.cgColor
-    frameLinesLayer.strokeColor = frameColor
-
-    let tickColor = _isLightBg
-      ? UIColor.black.withAlphaComponent(0.35).cgColor
-      : UIColor.white.withAlphaComponent(0.30).cgColor
-    tickMarksLayer.strokeColor = tickColor
-
-    // Brackets — purple
-    bracketMarkersLayer.strokeColor = _hudPurpleColor.cgColor
-
-    // Left scan line — cyan
-    let clearColor = UIColor.clear.cgColor
-    let cyanCG = _hudCyanColor.cgColor
-    leftScanLine.colors = [clearColor, cyanCG, cyanCG, clearColor]
-
-    // Right scan line — amber
-    let amberCG = _hudAmberColor.cgColor
-    rightScanLine.colors = [clearColor, amberCG, amberCG, clearColor]
-
-    // Left data dots — green, right data dots — amber
-    leftDotTemplate.backgroundColor = _hudGreenColor.cgColor
-    rightDotTemplate.backgroundColor = _hudAmberColor.cgColor
-
-    // Drift bit colors — cycle through palette with extra dimming
-    let bitColors: [UIColor] = [_hudCyanColor, _hudAmberColor, _hudPurpleColor, _hudGreenColor]
-    for (i, bit) in driftBitLayers.enumerated() {
-      bit.backgroundColor = bitColors[i % bitColors.count].withAlphaComponent(0.7).cgColor
+    switch kind {
+    case .battery:
+      return _isLightBg
+        ? UIColor(red: 0.1, green: 0.55, blue: 0.2, alpha: 0.85)
+        : UIColor(red: 0.45, green: 0.95, blue: 0.55, alpha: 0.78)
+    case .network:
+      return _isLightBg
+        ? UIColor(red: 0.0, green: 0.5, blue: 0.6, alpha: 0.85)
+        : UIColor(red: 0.4, green: 0.85, blue: 1.0, alpha: 0.78)
+    case .memory:
+      return _isLightBg
+        ? UIColor(red: 0.5, green: 0.25, blue: 0.65, alpha: 0.85)
+        : UIColor(red: 0.85, green: 0.6, blue: 1.0, alpha: 0.78)
+    case .thermal:
+      return _isLightBg
+        ? UIColor(red: 0.55, green: 0.45, blue: 0.05, alpha: 0.85)
+        : UIColor(red: 1.0, green: 0.85, blue: 0.4, alpha: 0.78)
+    case .sysUptime:
+      return _isLightBg
+        ? UIColor(red: 0.6, green: 0.3, blue: 0.05, alpha: 0.85)
+        : UIColor(red: 1.0, green: 0.7, blue: 0.4, alpha: 0.78)
+    case .date:
+      return _isLightBg
+        ? UIColor(red: 0.4, green: 0.3, blue: 0.55, alpha: 0.8)
+        : UIColor(red: 0.78, green: 0.72, blue: 1.0, alpha: 0.75)
     }
   }
 
-  // MARK: - Title Parsing
+  // MARK: - Title parsing
 
   private func _parseTitleComponents(_ title: String?) -> (user: String?, host: String?) {
     guard let title = title, !title.isEmpty else { return (nil, nil) }
 
-    // Match "user@host" or "user@host: path" or "user@host:path"
     guard let atIndex = title.firstIndex(of: "@") else { return (nil, nil) }
 
     let user = String(title[title.startIndex..<atIndex])
@@ -334,35 +326,71 @@ class StatusBarInfoView: UIView {
     return (user.isEmpty ? nil : user, host.isEmpty ? nil : host)
   }
 
-  // MARK: - Label Building
+  // MARK: - First-line label building
 
   private func _rebuildLabels() {
-    leftLabel.attributedText = _buildLeftAttributedString()
+    let now = Date()
+    let cal = Calendar.current
+    let curMinute = cal.component(.minute, from: now)
+    let minuteTicked = (_prevMinute != curMinute && _prevMinute != -1)
+    _prevMinute = curMinute
+
+    leftLabel.attributedText = _buildLeftAttributedString(now: now)
     rightLabel.attributedText = _buildRightAttributedString()
+
+    // Detect first-line value changes for animations
+    let countChanged = (_windowCount != _prevWindowCount && _prevWindowCount != -1)
+    let indexChanged = (_windowIndex != _prevWindowIndex && _prevWindowIndex != -1)
+    _prevWindowIndex = _windowIndex
+    _prevWindowCount = _windowCount
+
+    let hostDisplay = _currentHostDisplay()
+    let hostChanged = (hostDisplay != _prevHostDisplay && !_prevHostDisplay.isEmpty)
+    _prevHostDisplay = hostDisplay
+
+    if countChanged || indexChanged {
+      _flashLabel(leftLabel, scale: 1.18)
+    } else if minuteTicked {
+      _flashLabel(leftLabel, scale: 1.04)
+    }
+    if hostChanged {
+      _flashLabel(rightLabel, scale: 1.18)
+    }
   }
 
-  private func _buildLeftAttributedString() -> NSAttributedString {
+  private func _currentHostDisplay() -> String {
+    var parts: [String] = []
+    if let alias = _hostAlias { parts.append("≡\(alias)") }
+    if let user = _parsedUser, let host = _parsedHost {
+      parts.append("\(user)@\(host)")
+    } else if let host = _parsedHost {
+      parts.append(host)
+    } else if parts.isEmpty, let title = _rawTitle, !title.isEmpty {
+      parts.append(title)
+    }
+    return parts.isEmpty ? "blink" : parts.joined(separator: " ")
+  }
+
+  private func _buildLeftAttributedString(now: Date) -> NSAttributedString {
     let result = NSMutableAttributedString()
     let font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
 
-    // Window counter (only if multiple windows)
     if _windowCount > 1 {
       result.append(NSAttributedString(
         string: "▸ ",
         attributes: [.foregroundColor: _dimColor, .font: font]))
       result.append(NSAttributedString(
         string: "\(_windowIndex)/\(_windowCount)",
-        attributes: [.foregroundColor: _accentColor, .font: font]))
+        attributes: [.foregroundColor: _amberColor, .font: font]))
       result.append(NSAttributedString(
         string: " │ ",
         attributes: [.foregroundColor: _dimColor, .font: font]))
     }
 
-    // Live clock
-    let timeStr = _clockFormatter.string(from: Date())
+    let timeStr = _clockFormatter.string(from: now)
     result.append(NSAttributedString(
       string: timeStr,
-      attributes: [.foregroundColor: _primaryColor, .font: font]))
+      attributes: [.foregroundColor: _greenColor, .font: font]))
 
     return result
   }
@@ -371,37 +399,76 @@ class StatusBarInfoView: UIView {
     let result = NSMutableAttributedString()
     let font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
 
-    // Host info — prefer parsed user@host, fall back to raw terminal title
-    let hostDisplay: String
-    if let user = _parsedUser, let host = _parsedHost {
-      hostDisplay = "\(user)@\(host)"
-    } else if let host = _parsedHost {
-      hostDisplay = host
-    } else if let title = _rawTitle, !title.isEmpty {
-      hostDisplay = title
-    } else {
-      hostDisplay = "blink"
+    let hasAlias = _hostAlias != nil
+    let aliasMatchesHost: Bool = {
+      guard let a = _hostAlias, let h = _parsedHost else { return false }
+      return a.caseInsensitiveCompare(h) == .orderedSame
+    }()
+
+    if let alias = _hostAlias {
+      result.append(NSAttributedString(
+        string: "≡",
+        attributes: [.foregroundColor: _dimColor, .font: font]))
+      result.append(NSAttributedString(
+        string: alias,
+        attributes: [.foregroundColor: _greenColor, .font: font]))
     }
 
-    result.append(NSAttributedString(
-      string: hostDisplay,
-      attributes: [.foregroundColor: _accentColor, .font: font]))
+    let userColor = hasAlias ? _purpleColor.withAlphaComponent(0.55) : _purpleColor
+    let hostColor = hasAlias ? _cyanColor.withAlphaComponent(0.55) : _cyanColor
 
-    // Uptime
+    if let user = _parsedUser, let host = _parsedHost {
+      if hasAlias {
+        result.append(NSAttributedString(
+          string: " ",
+          attributes: [.foregroundColor: _dimColor, .font: font]))
+      }
+      result.append(NSAttributedString(
+        string: user,
+        attributes: [.foregroundColor: userColor, .font: font]))
+      if !aliasMatchesHost {
+        result.append(NSAttributedString(
+          string: "@",
+          attributes: [.foregroundColor: _dimColor, .font: font]))
+        result.append(NSAttributedString(
+          string: host,
+          attributes: [.foregroundColor: hostColor, .font: font]))
+      }
+    } else if let host = _parsedHost, !aliasMatchesHost {
+      if hasAlias {
+        result.append(NSAttributedString(
+          string: " ",
+          attributes: [.foregroundColor: _dimColor, .font: font]))
+      }
+      result.append(NSAttributedString(
+        string: host,
+        attributes: [.foregroundColor: hostColor, .font: font]))
+    } else if !hasAlias {
+      let fallback: String
+      if let title = _rawTitle, !title.isEmpty {
+        fallback = title
+      } else {
+        fallback = "blink"
+      }
+      result.append(NSAttributedString(
+        string: fallback,
+        attributes: [.foregroundColor: _cyanColor, .font: font]))
+    }
+
     if let startTime = _sessionStartTime {
       result.append(NSAttributedString(
         string: " │ ",
         attributes: [.foregroundColor: _dimColor, .font: font]))
-      let uptimeStr = _formatUptime(since: startTime)
       result.append(NSAttributedString(
-        string: "↑\(uptimeStr)",
-        attributes: [.foregroundColor: _primaryColor, .font: font]))
+        string: "↑",
+        attributes: [.foregroundColor: _dimColor, .font: font]))
+      result.append(NSAttributedString(
+        string: _formatUptime(since: startTime),
+        attributes: [.foregroundColor: _amberColor, .font: font]))
     }
 
     return result
   }
-
-  // MARK: - Uptime
 
   private func _formatUptime(since startTime: Date) -> String {
     let elapsed = Int(Date().timeIntervalSince(startTime))
@@ -416,7 +483,7 @@ class StatusBarInfoView: UIView {
     }
   }
 
-  // MARK: - Clock Timer
+  // MARK: - Timers
 
   private func _startClockTimer() {
     _clockTimer?.invalidate()
@@ -425,7 +492,14 @@ class StatusBarInfoView: UIView {
     }
   }
 
-  // MARK: - Pulse Animation
+  private func _startChipTimer() {
+    _chipTimer?.invalidate()
+    _chipTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+      self?._refreshChips(animate: true)
+    }
+  }
+
+  // MARK: - Pulse animation (status dot)
 
   private func _startPulseAnimation() {
     statusDot.layer.removeAnimation(forKey: "pulse")
@@ -443,206 +517,197 @@ class StatusBarInfoView: UIView {
     _startPulseAnimation()
   }
 
-  // MARK: - HUD Animations
+  // MARK: - Network monitor
 
-  private func _startHUDAnimations() {
-    let hudStart = horizontalMargin
-    let hudEnd = bounds.width - horizontalMargin
-    let fullWidth = hudEnd - hudStart
-    let hudHeight = bounds.height - 25
-    guard fullWidth > 40 else { return }
-
-    let scanLineWidth: CGFloat = 60
-
-    // Scan lines — continuous one-directional sweep
-    // Enter fully off-screen one side, exit fully off-screen the other,
-    // then loop. Since beam is invisible at both ends, the reset is invisible.
-    let scanDurationL: CFTimeInterval = _isRunningCmd ? 2.5 : 5.0
-    let scanDurationR: CFTimeInterval = _isRunningCmd ? 3.0 : 6.0
-
-    leftScanLine.removeAnimation(forKey: "scan")
-    let animL = CABasicAnimation(keyPath: "position.x")
-    animL.fromValue = hudStart - scanLineWidth
-    animL.toValue = hudEnd + scanLineWidth
-    animL.duration = scanDurationL
-    animL.repeatCount = .infinity
-    animL.timingFunction = CAMediaTimingFunction(name: .linear)
-    leftScanLine.add(animL, forKey: "scan")
-
-    rightScanLine.removeAnimation(forKey: "scan")
-    let animR = CABasicAnimation(keyPath: "position.x")
-    animR.fromValue = hudEnd + scanLineWidth
-    animR.toValue = hudStart - scanLineWidth
-    animR.duration = scanDurationR
-    animR.repeatCount = .infinity
-    animR.timingFunction = CAMediaTimingFunction(name: .linear)
-    rightScanLine.add(animR, forKey: "scan")
-
-    // Bracket marker pulse
-    bracketMarkersLayer.removeAnimation(forKey: "pulse")
-    let bracketAnim = CABasicAnimation(keyPath: "opacity")
-    bracketAnim.fromValue = 0.5
-    bracketAnim.toValue = 0.15
-    bracketAnim.duration = 3.0
-    bracketAnim.autoreverses = true
-    bracketAnim.repeatCount = .infinity
-    bracketAnim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-    bracketMarkersLayer.add(bracketAnim, forKey: "pulse")
-
-    // Data stream scroll — single-spacing seamless loop
-    // Each stream shifts by exactly one dot-spacing, then resets.
-    // The pattern tiles perfectly so the reset is invisible.
-    let dotSpacing: CGFloat = 6
-
-    leftDataStream.removeAnimation(forKey: "scroll")
-    let scrollAnimL = CABasicAnimation(keyPath: "sublayerTransform.translation.x")
-    scrollAnimL.fromValue = 0
-    scrollAnimL.toValue = dotSpacing
-    scrollAnimL.duration = 0.8
-    scrollAnimL.repeatCount = .infinity
-    scrollAnimL.timingFunction = CAMediaTimingFunction(name: .linear)
-    leftDataStream.add(scrollAnimL, forKey: "scroll")
-
-    rightDataStream.removeAnimation(forKey: "scroll")
-    let scrollAnimR = CABasicAnimation(keyPath: "sublayerTransform.translation.x")
-    scrollAnimR.fromValue = 0
-    scrollAnimR.toValue = -dotSpacing
-    scrollAnimR.duration = 0.8
-    scrollAnimR.repeatCount = .infinity
-    scrollAnimR.timingFunction = CAMediaTimingFunction(name: .linear)
-    rightDataStream.add(scrollAnimR, forKey: "scroll")
-
-    // Drift bits — pseudo-random jitter animations
-    let now = CACurrentMediaTime()
-    for (i, bit) in driftBitLayers.enumerated() {
-      guard !bit.isHidden else { continue }
-
-      bit.removeAnimation(forKey: "drift")
-      bit.removeAnimation(forKey: "flicker")
-
-      let home = bit.position
-      srand48(i * 13 + 97)
-
-      // Build waypoints: home -> random offsets with dwell -> home
-      var waypoints: [NSValue] = [NSValue(cgPoint: home)]
-      var keyTimes: [NSNumber] = [0.0]
-      let stops = 5
-      var t: Double = 0
-
-      for j in 0..<stops {
-        // Short transition to next position
-        t += 0.04 + drand48() * 0.03
-        let angle = drand48() * .pi * 2
-        let dist = drand48() * Double(driftBitJitterRadius)
-        let wx = Double(home.x) + cos(angle) * dist
-        let wy = Double(home.y) + sin(angle) * dist
-        let clamped = CGPoint(
-          x: max(Double(hudStart + 2), min(Double(hudEnd - 2), wx)),
-          y: max(2, min(Double(hudHeight - 2), wy))
-        )
-        waypoints.append(NSValue(cgPoint: clamped))
-        keyTimes.append(NSNumber(value: min(t, 0.99)))
-
-        // Long dwell at this position
-        t += 0.12 + drand48() * 0.08
-        if j < stops - 1 {
-          waypoints.append(NSValue(cgPoint: clamped))
-          keyTimes.append(NSNumber(value: min(t, 0.99)))
+  private func _startNetworkMonitor() {
+    netMonitor.pathUpdateHandler = { [weak self] path in
+      let str: String
+      let sev: Int
+      if path.status == .satisfied {
+        if path.usesInterfaceType(.wifi) {
+          str = "wifi"; sev = 0
+        } else if path.usesInterfaceType(.cellular) {
+          str = "cell"; sev = 0
+        } else if path.usesInterfaceType(.wiredEthernet) {
+          str = "eth"; sev = 0
+        } else {
+          str = "on"; sev = 0
         }
+      } else {
+        str = "off"; sev = 2
+      }
+      DispatchQueue.main.async {
+        guard let self = self else { return }
+        self.netStatusString = str
+        self.netStatusSeverity = sev
+        self._refreshChips(animate: true)
+      }
+    }
+    netMonitor.start(queue: DispatchQueue.global(qos: .background))
+  }
+
+  // MARK: - Status queries
+
+  private func _readBattery() -> (String, Int) {
+    let dev = UIDevice.current
+    let level = dev.batteryLevel
+    if level < 0 {
+      return ("BAT --", 0)
+    }
+    let pct = Int(round(level * 100))
+    let isCharging = (dev.batteryState == .charging || dev.batteryState == .full)
+    let suffix = isCharging ? "↑" : ""
+    let sev: Int
+    if pct <= 10 { sev = 2 }
+    else if pct <= 25 { sev = 1 }
+    else { sev = 0 }
+    return ("BAT \(pct)%\(suffix)", sev)
+  }
+
+  private func _readNetwork() -> (String, Int) {
+    return ("NET \(netStatusString)", netStatusSeverity)
+  }
+
+  private func _readMemory() -> (String, Int) {
+    var info = mach_task_basic_info()
+    var count = mach_msg_type_number_t(
+      MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+    let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
+      $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+        task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+      }
+    }
+    guard kerr == KERN_SUCCESS else { return ("MEM --", 0) }
+    let mb = Int(info.resident_size / (1024 * 1024))
+    let sev: Int
+    if mb >= 800 { sev = 2 }
+    else if mb >= 500 { sev = 1 }
+    else { sev = 0 }
+    return ("MEM \(mb)M", sev)
+  }
+
+  private func _readThermal() -> (String, Int) {
+    let s = ProcessInfo.processInfo.thermalState
+    switch s {
+    case .nominal:  return ("THM ok", 0)
+    case .fair:     return ("THM warm", 0)
+    case .serious:  return ("THM hot", 1)
+    case .critical: return ("THM crit", 2)
+    @unknown default: return ("THM ?", 0)
+    }
+  }
+
+  private func _readSysUptime() -> (String, Int) {
+    let elapsed = Int(ProcessInfo.processInfo.systemUptime)
+    let d = elapsed / 86400
+    let h = (elapsed % 86400) / 3600
+    let m = (elapsed % 3600) / 60
+    let str: String
+    if d > 0 {
+      str = "\(d)d\(h)h"
+    } else if h > 0 {
+      str = "\(h)h\(m)m"
+    } else {
+      str = "\(m)m"
+    }
+    let sev = ProcessInfo.processInfo.isLowPowerModeEnabled ? 1 : 0
+    return ("SYS \(str)", sev)
+  }
+
+  private func _readDate() -> (String, Int) {
+    return ("DAT \(_dateFormatter.string(from: Date()))", 0)
+  }
+
+  // MARK: - Chip refresh & animation
+
+  private func _refreshChips(animate: Bool) {
+    let readings: [(ChipKind, (String, Int))] = [
+      (.battery,   _readBattery()),
+      (.network,   _readNetwork()),
+      (.memory,    _readMemory()),
+      (.thermal,   _readThermal()),
+      (.sysUptime, _readSysUptime()),
+      (.date,      _readDate()),
+    ]
+
+    var widthDirty = false
+    for (kind, (val, sev)) in readings {
+      guard let label = chipLabels[kind] else { continue }
+      let prevVal = chipValues[kind] ?? ""
+      let prevSev = chipSeverity[kind] ?? 0
+      let valueChanged = (prevVal != val)
+      let sevChanged = (prevSev != sev)
+
+      label.text = val
+      label.textColor = _chipColor(kind, severity: sev)
+
+      if valueChanged { widthDirty = true }
+
+      if animate && (valueChanged || sevChanged) && !prevVal.isEmpty {
+        _flashChip(label, severity: sev)
       }
 
-      // Return home
-      waypoints.append(NSValue(cgPoint: home))
-      keyTimes.append(1.0)
-
-      let timingFns = (0..<(waypoints.count - 1)).map { _ in
-        CAMediaTimingFunction(name: .easeInEaseOut)
-      }
-
-      let drift = CAKeyframeAnimation(keyPath: "position")
-      drift.values = waypoints
-      drift.keyTimes = keyTimes
-      drift.timingFunctions = timingFns
-      drift.duration = 14.0 + drand48() * 8.0
-      drift.repeatCount = .infinity
-      drift.beginTime = now + drand48() * 6.0
-      drift.fillMode = .backwards
-      bit.add(drift, forKey: "drift")
-
-      // Subtle opacity flicker
-      srand48(i * 31 + 53)
-      let flicker = CAKeyframeAnimation(keyPath: "opacity")
-      flicker.values = [0.7, 0.9, 0.5, 0.8, 0.55, 0.7] as [NSNumber]
-      flicker.keyTimes = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
-      flicker.duration = 10.0 + drand48() * 8.0
-      flicker.repeatCount = .infinity
-      flicker.beginTime = now + drand48() * 4.0
-      flicker.fillMode = .backwards
-      bit.add(flicker, forKey: "flicker")
+      chipValues[kind] = val
+      chipSeverity[kind] = sev
     }
 
-    _hudAnimationsRunning = true
-  }
-
-  // MARK: - HUD Path Builders
-
-  private func _buildFrameLinesPath(
-    start: CGFloat, end: CGFloat, hudHeight: CGFloat
-  ) -> UIBezierPath {
-    let path = UIBezierPath()
-
-    // Top line — full width
-    path.move(to: CGPoint(x: start, y: 1))
-    path.addLine(to: CGPoint(x: end, y: 1))
-
-    // Bottom line — full width, just above label zone
-    path.move(to: CGPoint(x: start, y: hudHeight - 1))
-    path.addLine(to: CGPoint(x: end, y: hudHeight - 1))
-
-    return path
-  }
-
-  private func _buildTickMarksPath(
-    start: CGFloat, end: CGFloat
-  ) -> UIBezierPath {
-    let path = UIBezierPath()
-    let tickSpacing: CGFloat = 8
-    let minorHeight: CGFloat = 3
-    let majorHeight: CGFloat = 5
-    let topY: CGFloat = 2
-
-    var x = start
-    var idx = 0
-    while x <= end {
-      let h = (idx % 4 == 0) ? majorHeight : minorHeight
-      path.move(to: CGPoint(x: x, y: topY))
-      path.addLine(to: CGPoint(x: x, y: topY + h))
-      x += tickSpacing
-      idx += 1
+    if widthDirty {
+      setNeedsLayout()
     }
-
-    return path
   }
 
-  private func _buildBracketMarkersPath(
-    start: CGFloat, end: CGFloat, hudHeight: CGFloat
-  ) -> UIBezierPath {
-    let path = UIBezierPath()
-    let size: CGFloat = 8
+  private func _flashChip(_ label: UILabel, severity: Int) {
+    // Cross-fade old/new text rendering
+    let trans = CATransition()
+    trans.duration = 0.45
+    trans.type = .fade
+    label.layer.add(trans, forKey: "chipFade")
 
-    func bracket(corner: CGPoint, hDir: CGFloat, vDir: CGFloat) {
-      path.move(to: CGPoint(x: corner.x + hDir * size, y: corner.y))
-      path.addLine(to: corner)
-      path.addLine(to: CGPoint(x: corner.x, y: corner.y + vDir * size))
+    // A scale bump scales severity differences too
+    let scale: CGFloat = severity >= 2 ? 1.35 : (severity == 1 ? 1.25 : 1.18)
+    label.layer.removeAnimation(forKey: "chipBump")
+    let bump = CAKeyframeAnimation(keyPath: "transform.scale")
+    bump.values = [1.0, scale, 1.0]
+    bump.keyTimes = [0.0, 0.35, 1.0]
+    bump.duration = 0.7
+    bump.timingFunctions = [
+      CAMediaTimingFunction(name: .easeOut),
+      CAMediaTimingFunction(name: .easeInEaseOut),
+    ]
+    label.layer.add(bump, forKey: "chipBump")
+  }
+
+  private func _flashLabel(_ label: UILabel, scale: CGFloat) {
+    label.layer.removeAnimation(forKey: "labelBump")
+    let bump = CAKeyframeAnimation(keyPath: "transform.scale")
+    bump.values = [1.0, scale, 1.0]
+    bump.keyTimes = [0.0, 0.3, 1.0]
+    bump.duration = 0.6
+    bump.timingFunctions = [
+      CAMediaTimingFunction(name: .easeOut),
+      CAMediaTimingFunction(name: .easeInEaseOut),
+    ]
+    label.layer.add(bump, forKey: "labelBump")
+  }
+
+  private func _startChipBaselineAnimation() {
+    // Subtle staggered breathing — keeps the row feeling alive without
+    // the busy-ness of the old scan/drift HUD.
+    let now = CACurrentMediaTime()
+    for (i, kind) in ChipKind.allCases.enumerated() {
+      guard let label = chipLabels[kind] else { continue }
+      label.layer.removeAnimation(forKey: "breathe")
+      let anim = CABasicAnimation(keyPath: "opacity")
+      anim.fromValue = 0.78
+      anim.toValue = 1.0
+      anim.duration = 1.8 + Double(i) * 0.22
+      anim.autoreverses = true
+      anim.repeatCount = .infinity
+      anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+      anim.beginTime = now + Double(i) * 0.18
+      anim.fillMode = .backwards
+      label.layer.add(anim, forKey: "breathe")
     }
-
-    // Four corners of the full-width HUD zone
-    bracket(corner: CGPoint(x: start, y: 2), hDir: 1, vDir: 1)
-    bracket(corner: CGPoint(x: end, y: 2), hDir: -1, vDir: 1)
-    bracket(corner: CGPoint(x: start, y: hudHeight - 2), hDir: 1, vDir: -1)
-    bracket(corner: CGPoint(x: end, y: hudHeight - 2), hDir: -1, vDir: -1)
-
-    return path
   }
 
   // MARK: - Layout
@@ -659,157 +724,97 @@ class StatusBarInfoView: UIView {
     } else {
       centerExclusion = 0
     }
-    _centerExclusion = centerExclusion
 
     let halfExclusion = centerExclusion / 2
     let midX = bounds.width / 2
     let labelHeight: CGFloat = 16
     let labelY = bounds.height - labelHeight - 7
 
-    // Status dot — left edge, vertically centered with labels
+    // Status dot — left edge, vertically centered with first-line labels
     let dotX = horizontalMargin
     let dotY = labelY + (labelHeight - dotSize) / 2
     statusDot.frame = CGRect(x: dotX, y: dotY, width: dotSize, height: dotSize)
 
-    // Left label — after dot
+    // First-line left
     let leftX = dotX + dotSize + 6
     let leftWidth = midX - halfExclusion - leftX
     leftLabel.frame = CGRect(
-      x: leftX,
-      y: labelY,
-      width: max(leftWidth, 0),
-      height: labelHeight
-    )
+      x: leftX, y: labelY,
+      width: max(leftWidth, 0), height: labelHeight)
 
-    // Right label
+    // First-line right
     let rightX = midX + halfExclusion
     let rightWidth = midX - halfExclusion - horizontalMargin
     rightLabel.frame = CGRect(
-      x: rightX,
-      y: labelY,
-      width: max(rightWidth, 0),
-      height: labelHeight
-    )
+      x: rightX, y: labelY,
+      width: max(rightWidth, 0), height: labelHeight)
 
-    // MARK: HUD Layout
-    let hudHeight = bounds.height - 25
-    hudContainerLayer.frame = CGRect(x: 0, y: 0, width: bounds.width, height: max(hudHeight, 0))
+    // Chip row — fills the area above first line, splitting around any
+    // center exclusion (Dynamic Island / notch).
+    let chipHeight: CGFloat = 14
+    let chipY = labelY - chipHeight - 3
 
-    if hudHeight < 5 {
-      hudContainerLayer.isHidden = true
+    if chipY < 2 {
+      for (_, l) in chipLabels { l.isHidden = true }
       return
     }
-    hudContainerLayer.isHidden = false
 
-    // HUD elements span the FULL width (render behind the Dynamic Island)
-    let hudStart = horizontalMargin
-    let hudEnd = bounds.width - horizontalMargin
-    let fullWidth = hudEnd - hudStart
+    let allChips = ChipKind.allCases
+    let half = allChips.count / 2
+    let leftChips = Array(allChips.prefix(half))
+    let rightChips = Array(allChips.suffix(allChips.count - half))
 
-    // Disable implicit animations for layout changes
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
+    let leftZoneStart = horizontalMargin
+    let leftZoneEnd = midX - halfExclusion - 4
+    let rightZoneStart = midX + halfExclusion + 4
+    let rightZoneEnd = bounds.width - horizontalMargin
 
-    // Frame lines — full width
-    frameLinesLayer.frame = hudContainerLayer.bounds
-    frameLinesLayer.path = _buildFrameLinesPath(
-      start: hudStart, end: hudEnd, hudHeight: hudHeight
-    ).cgPath
+    _layoutChipRow(leftChips,
+                   from: leftZoneStart, to: leftZoneEnd,
+                   y: chipY, height: chipHeight)
+    _layoutChipRow(rightChips,
+                   from: rightZoneStart, to: rightZoneEnd,
+                   y: chipY, height: chipHeight)
+  }
 
-    // Tick marks — full width
-    tickMarksLayer.frame = hudContainerLayer.bounds
-    tickMarksLayer.path = _buildTickMarksPath(
-      start: hudStart, end: hudEnd
-    ).cgPath
-
-    // Bracket markers — at the four corners
-    bracketMarkersLayer.frame = hudContainerLayer.bounds
-    bracketMarkersLayer.path = _buildBracketMarkersPath(
-      start: hudStart, end: hudEnd, hudHeight: hudHeight
-    ).cgPath
-    bracketMarkersLayer.isHidden = false
-
-    // Scan lines — position at y=8, sweep full width
-    let scanY: CGFloat = min(8, hudHeight / 2)
-    leftScanLine.position = CGPoint(x: midX, y: scanY)
-    rightScanLine.position = CGPoint(x: midX, y: scanY + 10)
-
-    // Data streams — full width, seamless scrolling
-    let dotSpacing: CGFloat = 6
-    let dotDiameter: CGFloat = 2.5
-    let streamY: CGFloat = min(18, hudHeight - 4)
-
-    if fullWidth > 0 {
-      let visibleDots = Int(fullWidth / dotSpacing) + 3
-
-      // Left stream (scrolls right) — template one spacing off-screen left,
-      // instances replicate rightward. Shifting right by one spacing tiles perfectly.
-      leftDataStream.isHidden = false
-      leftDataStream.frame = CGRect(
-        x: hudStart, y: streamY - dotDiameter / 2,
-        width: fullWidth, height: dotDiameter)
-      leftDotTemplate.position = CGPoint(x: -dotSpacing + dotDiameter / 2, y: dotDiameter / 2)
-      leftDataStream.instanceCount = visibleDots
-
-      // Right stream (scrolls left) — template one spacing off-screen right,
-      // instances replicate leftward (negative instanceTransform). Shifting left
-      // by one spacing tiles perfectly.
-      rightDataStream.isHidden = false
-      rightDataStream.frame = CGRect(
-        x: hudStart, y: streamY - dotDiameter / 2 + 6,
-        width: fullWidth, height: dotDiameter)
-      rightDotTemplate.position = CGPoint(x: fullWidth + dotSpacing - dotDiameter / 2, y: dotDiameter / 2)
-      rightDataStream.instanceCount = visibleDots
-    } else {
-      leftDataStream.isHidden = true
-      rightDataStream.isHidden = true
+  private func _layoutChipRow(
+    _ chips: [ChipKind], from start: CGFloat, to end: CGFloat,
+    y: CGFloat, height: CGFloat
+  ) {
+    let zoneWidth = end - start
+    if zoneWidth < 30 {
+      for kind in chips { chipLabels[kind]?.isHidden = true }
+      return
     }
 
-    // Drift bits — compute home positions
-    let bitYMin: CGFloat = 6
-    let bitYMax: CGFloat = max(hudHeight - 6, bitYMin + 1)
-    let leftZoneStart = hudStart + 10
-    let leftZoneEnd = midX - halfExclusion - 5
-    let rightZoneStart = midX + halfExclusion + 5
-    let rightZoneEnd = hudEnd - 10
-    let halfCount = driftBitCount / 2
+    let widths = chips.map { kind -> CGFloat in
+      chipLabels[kind]?.intrinsicContentSize.width ?? 0
+    }
 
-    for i in 0..<driftBitCount {
-      srand48(i * 7 + 31)
-      let bit = driftBitLayers[i]
+    // Greedy fit from left: drop trailing chips that don't fit
+    let minGap: CGFloat = 6
+    var visibleCount = 0
+    var totalUsed: CGFloat = 0
+    for w in widths {
+      let needed = totalUsed + w + (visibleCount > 0 ? minGap : 0)
+      if needed > zoneWidth { break }
+      totalUsed = needed
+      visibleCount += 1
+    }
 
-      let zoneStart: CGFloat
-      let zoneEnd: CGFloat
-      let zoneIndex: Int
+    let extra = zoneWidth - totalUsed
+    let gap: CGFloat = visibleCount > 1 ? minGap + extra / CGFloat(visibleCount - 1) : minGap
 
-      if i < halfCount {
-        zoneStart = leftZoneStart
-        zoneEnd = leftZoneEnd
-        zoneIndex = i
+    var x = start
+    for (i, kind) in chips.enumerated() {
+      guard let label = chipLabels[kind] else { continue }
+      if i < visibleCount {
+        label.isHidden = false
+        label.frame = CGRect(x: x, y: y, width: widths[i], height: height)
+        x += widths[i] + gap
       } else {
-        zoneStart = rightZoneStart
-        zoneEnd = rightZoneEnd
-        zoneIndex = i - halfCount
+        label.isHidden = true
       }
-
-      let zoneWidth = zoneEnd - zoneStart
-      guard zoneWidth > 10 else { bit.isHidden = true; continue }
-      bit.isHidden = false
-
-      let segmentWidth = zoneWidth / CGFloat(halfCount)
-      let homeX = zoneStart + segmentWidth * (CGFloat(zoneIndex) + 0.5)
-                  + CGFloat(drand48()) * segmentWidth * 0.4 - segmentWidth * 0.2
-      let homeY = bitYMin + CGFloat(drand48()) * (bitYMax - bitYMin)
-
-      bit.position = CGPoint(x: homeX, y: homeY)
-    }
-
-    CATransaction.commit()
-
-    // Only restart HUD animations when the view size actually changes
-    if _lastLayoutSize != bounds.size || !_hudAnimationsRunning {
-      _lastLayoutSize = bounds.size
-      _startHUDAnimations()
     }
   }
 }

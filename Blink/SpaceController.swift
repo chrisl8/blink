@@ -591,7 +591,8 @@ Please go to your subscriptions and cancel one of them!
       title: title,
       bgColor: view.backgroundColor,
       isRunningCmd: term.isRunningCmd(),
-      sessionStartTime: _sessionStartTimes[term.meta.key]
+      sessionStartTime: _sessionStartTimes[term.meta.key],
+      hostAlias: term.currentHostAlias()
     )
     #endif
   }
