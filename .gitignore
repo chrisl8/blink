@@ -57,3 +57,9 @@ Resources/Fonts/Pragmata*
 .swiftpm
 
 Blink.xcodeproj/project.xcworkspace/xcshareddata
+
+## Signing material — never commit certs or private keys
+*.p12
+*.cer
+*.certSigningRequest
+*.mobileprovision
