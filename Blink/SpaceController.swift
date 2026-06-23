@@ -530,40 +530,19 @@ Please go to your subscriptions and cancel one of them!
       view.window?.backgroundColor = bgColor
     }
     
-    let hud = MBProgressHUD.showAdded(to: _overlay, animated: _hud == nil)
-    
-    hud.mode = .customView
-    hud.bezelView.color = .darkGray
-    hud.contentColor = .white
-    hud.isUserInteractionEnabled = false
-    hud.alpha = 0.6
-    
-    let pages = UIPageControl()
-    pages.currentPageIndicatorTintColor = .blinkHudDot
-    pages.numberOfPages = _viewportsKeys.count
-    let pageNum = _viewportsKeys.firstIndex(of: term.meta.key)
-    pages.currentPage = pageNum ?? NSNotFound
-    
-    hud.customView = pages
-    
+    // Visual HUD overlay (terminal size / title / page dots) intentionally
+    // disabled. We still keep the window scene title and status bar info below.
     let title = term.title?.isEmpty == true ? nil : term.title
-    
+
+    let pageNum = _viewportsKeys.firstIndex(of: term.meta.key)
+
     var sceneTitle = "[\(pageNum == nil ? 1 : pageNum! + 1) of \(_viewportsKeys.count)] \(title ?? "blink")"
-    
-    if term.termView.rows == 0 && term.termView.cols == 0 {
-      hud.label.numberOfLines = 1
-      hud.label.text = title ?? "blink"
-    } else {
+
+    if !(term.termView.rows == 0 && term.termView.cols == 0) {
       let geometry = "\(term.termView.cols)×\(term.termView.rows)"
-      hud.label.numberOfLines = 2
-      hud.label.text = "\(title ?? "blink")\n\(geometry)"
-      
       sceneTitle += " | " + geometry
     }
-    
-    _hud = hud
-    hud.hide(animated: true, afterDelay: 1)
-    
+
     view.window?.windowScene?.title = sceneTitle
     self.view.setNeedsLayout()
 
