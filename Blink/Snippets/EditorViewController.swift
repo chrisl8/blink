@@ -230,6 +230,10 @@ class EditorViewController: UIViewController, TextViewDelegate, UINavigationItem
       textViewBottomConstraint!
     ])
 
+    // Dock Send/Cancel directly above the keyboard so the primary action stays in
+    // thumb reach while typing — no reaching for the top nav bar on a large screen.
+    textView.inputAccessoryView = _makeInputAccessoryView()
+
     if let snippet = model.editingSnippet,
        let content = try? snippet.content {
       textView.text = content
@@ -372,7 +376,7 @@ extension EditorViewController {
     // Update model
     model.languageMode = languageMode
 
-    if isScratch {
+    if isScratch && model.persistsScratchLanguageMode {
       BLKDefaults.setScratchLanguageMode(languageMode.rawValue)
       BLKDefaults.save()
     }
@@ -381,6 +385,20 @@ extension EditorViewController {
     textView.configure(for: languageMode)
 
     _updateNavigationBar()
+  }
+
+  private func _makeInputAccessoryView() -> UIView {
+    let bar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
+    bar.autoresizingMask = .flexibleWidth
+
+    let cancel = UIBarButtonItem(
+      barButtonSystemItem: .cancel, target: self, action: #selector(cancel))
+    let flex = UIBarButtonItem(systemItem: .flexibleSpace)
+    let send = UIBarButtonItem(
+      title: "Send", style: .done, target: self, action: #selector(send))
+
+    bar.items = [cancel, flex, send]
+    return bar
   }
 
   private func _createSendAction(title: String, formatter: ShellOutputFormatter) -> UIAction {

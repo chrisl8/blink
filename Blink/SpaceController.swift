@@ -1046,6 +1046,21 @@ extension SpaceController {
     // }
   }
 
+  // Opens Scratch forced into Prompt (natural-language) mode with Pin on, so
+  // iOS autocorrect/spellcheck/dictation are available for composing prompts
+  // (e.g. to Claude Code) and the sheet stays open for back-and-forth.
+  @objc func showScratchPromptAction() {
+    if let _ = _snippetsVC {
+      return
+    }
+    self.currentTerm()?.resignInput()
+
+    self.presentSnippetsControllerWithScratch(promptMode: true)
+    if let _ = self._interactiveSpaceController()._blinkMenu {
+      self.toggleQuickActionsAction()
+    }
+  }
+
   private func _toggleQuickActionActionWith(receiver: SpaceController) {
     if let menu = _blinkMenu {
       _blinkMenu = nil
@@ -1059,7 +1074,7 @@ extension SpaceController {
       self.view.addSubview(menu.tapToCloseView)
       
       var ids: [BlinkActionID] = []
-      ids.append(contentsOf:  [.snippets, .tabClose, .tabCreate])
+      ids.append(contentsOf:  [.snippets, .scratch, .tabClose, .tabCreate])
       
       if DeviceInfo.shared().hasCorners {
         ids.append(contentsOf:  [.layoutMenu])
@@ -1267,11 +1282,12 @@ extension SpaceController: CommandsHUDDelegate {
 
 extension SpaceController: SnippetContext {
   
-  func _presentSnippetsController(receiver: SpaceController, openScratch: Bool = false) {
+  func _presentSnippetsController(receiver: SpaceController, openScratch: Bool = false, promptMode: Bool = false) {
     do {
       self.view.window?.makeKeyAndVisible()
       let ctrl = try SnippetsViewController.create(context: receiver, transitionFrame: _blinkMenu?.bounds)
       ctrl.pendingOpenScratch = openScratch
+      ctrl.pendingScratchPromptMode = promptMode
       DispatchQueue.main.async {
         ctrl.view.frame = self.view.bounds
         ctrl.willMove(toParent: self)
@@ -1290,8 +1306,8 @@ extension SpaceController: SnippetContext {
     _interactiveSpaceController()._presentSnippetsController(receiver: self)
   }
 
-  func presentSnippetsControllerWithScratch() {
-    _interactiveSpaceController()._presentSnippetsController(receiver: self, openScratch: true)
+  func presentSnippetsControllerWithScratch(promptMode: Bool = false) {
+    _interactiveSpaceController()._presentSnippetsController(receiver: self, openScratch: true, promptMode: promptMode)
   }
   
   func _dismissSnippetsController(ctrl: SpaceController) {

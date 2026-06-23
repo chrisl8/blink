@@ -37,6 +37,7 @@
 #import "GeoManager.h"
 
 const BlinkActionID BlinkActionSnippets = @"blink-snippets";
+const BlinkActionID BlinkActionScratch = @"blink-scratch";
 const BlinkActionID BlinkActionTabClose = @"blink-tab-close";
 const BlinkActionID BlinkActionTabCreate = @"blink-tab-create";
 const BlinkActionID BlinkActionLayoutMenu = @"blink-layout-menu";
@@ -261,10 +262,19 @@ const CGFloat MENU_PADDING = 10.0;
             actionWithTitle:noTitle ? @"" : @"Snips"
             image:[UIImage systemImageNamed:@"chevron.left.square"]
             identifier:elementID handler:^(__kindof UIAction * _Nonnull action) {
-      [[delegate spaceController] showSnippetsAction];      
+      [[delegate spaceController] showSnippetsAction];
     }];
   }
-  
+
+  if (elementID == BlinkActionScratch) {
+    return [UIAction
+            actionWithTitle:noTitle ? @"" : @"Prompt"
+            image:[UIImage systemImageNamed:@"text.bubble"]
+            identifier:elementID handler:^(__kindof UIAction * _Nonnull action) {
+      [[delegate spaceController] showScratchPromptAction];
+    }];
+  }
+
   if (elementID == BlinkActionTabClose) {
     return [UIAction
             actionWithTitle:noTitle ? @"" : @"Close"

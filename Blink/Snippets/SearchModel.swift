@@ -69,6 +69,14 @@ class SearchModel: ObservableObject {
   @Published var indexProgress: SnippetsLocations.RefreshProgress = .none
   @Published var isPinnedMode = false
   @Published var languageMode: LanguageMode = .shell
+  // When false, the editor won't persist scratch's language mode to BLKDefaults.
+  // Used by the forced "Prompt" scratch entry point so it doesn't clobber the
+  // remembered mode of the plain scratch (⌘⇧.) entry point.
+  var persistsScratchLanguageMode = true
+  // True when scratch was opened directly into the editor (no snippets browser
+  // behind it). On close we then tear down the whole controller and return to the
+  // terminal, instead of focusing the now-hidden snippets search field.
+  var scratchStandalone = false
   let defaultShellOutputFormatter = ShellOutputFormatter.lineBySemicolon
 
   let snippetsLocations: SnippetsLocations
@@ -176,13 +184,25 @@ class SearchModel: ObservableObject {
     self.close()
   }
 
-  func openScratch() {
+  func openScratch(forcePromptMode: Bool = false) {
     let snippet = Snippet.scratch()
     self.editingMode = .code
+    // Opened straight into the editor — nothing to return to but the terminal.
+    self.scratchStandalone = true
 
-    // Restore saved language mode for scratch
-    if let savedMode = LanguageMode(rawValue: BLKDefaults.scratchLanguageMode()) {
-      self.languageMode = savedMode
+    if forcePromptMode {
+      // Prompt mode: enable iOS text assistance + dictation for composing
+      // natural-language prompts. Left unpinned so the sheet dismisses on send and
+      // you drop back to the terminal to watch the response (tap Pin to stay open).
+      // Don't persist this choice over the plain scratch entry point's mode.
+      self.languageMode = .prompt
+      self.persistsScratchLanguageMode = false
+    } else {
+      self.persistsScratchLanguageMode = true
+      // Restore saved language mode for scratch
+      if let savedMode = LanguageMode(rawValue: BLKDefaults.scratchLanguageMode()) {
+        self.languageMode = savedMode
+      }
     }
 
     self.currentSnippetName = snippet.fuzzyIndex
@@ -299,10 +319,18 @@ class SearchModel: ObservableObject {
   func sendPromptContentToReceiver(content: String) {
     let formatted = ShellOutputFormatter.raw.format(content)
     let receiver = self.snippetContext?.providerSnippetReceiver()
-    receiver?.receive(formatted)
+    // Paste the body (bracketed when the remote supports it) so embedded newlines
+    // stay literal; the submit Enter trails separately, outside the paste brackets.
+    receiver?.receiveAsPaste(formatted)
 
-    // Prompt submit trails the content so shells don't read it as part of the same sequence.
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+    // The submit Enter must land as a *separate* input event, not coalesced with the
+    // paste — otherwise TUIs like Claude Code treat it as the paste's trailing newline
+    // and ignore it (you'd have to press Enter again). Multi-line content is collapsed
+    // into a "[Pasted text]" chip and needs a longer gap to settle, so scale the delay
+    // up when the body contains line breaks.
+    let isMultiline = formatted.contains("\n") || formatted.contains("\r")
+    let submitDelay = isMultiline ? 0.5 : 0.1
+    DispatchQueue.main.asyncAfter(deadline: .now() + submitDelay) {
       receiver?.receive("\r")
       self.cleanupAfterSend()
     }
@@ -325,8 +353,15 @@ class SearchModel: ObservableObject {
   @objc func closeEditor() {
     self.editingSnippet = nil
     self.newSnippetPresented = false
+    let standalone = scratchStandalone
     self.rootCtrl?.presentedViewController?.dismiss(animated: true) {
-      self.focusOnInput()
+      if standalone {
+        // No snippets browser behind the editor — dismiss everything and hand
+        // focus back to the terminal.
+        self.snippetContext?.dismissSnippetsController()
+      } else {
+        self.focusOnInput()
+      }
     }
   }
 
@@ -386,6 +421,16 @@ class SearchModel: ObservableObject {
 
 public protocol SnippetReceiver {
   func receive(_ content: String)
+  // Send a body of text as a paste, so the terminal can wrap it in bracketed-paste
+  // markers when the remote supports them (keeping multi-line content from being
+  // read as separate lines/submits). Defaults to a plain `receive`.
+  func receiveAsPaste(_ content: String)
+}
+
+public extension SnippetReceiver {
+  func receiveAsPaste(_ content: String) {
+    receive(content)
+  }
 }
 
 public protocol SnippetContext {
@@ -400,6 +445,19 @@ extension TermDevice: SnippetReceiver {
       self.write(inDirectly: content)
     } else {
       self.view?.paste(content)
+    }
+  }
+
+  // Route through hterm's paste handler (term_paste -> onPaste_), which wraps the
+  // text in bracketed-paste markers when the remote enabled them (e.g. Claude Code).
+  // This keeps newlines in a multi-line prompt literal instead of submitting each
+  // line. When the remote hasn't enabled bracketed paste, hterm sends it unwrapped,
+  // matching the previous behavior. Used by prompt sends regardless of rawMode.
+  public func receiveAsPaste(_ content: String) {
+    if let view = self.view {
+      view.paste(content)
+    } else {
+      self.receive(content)
     }
   }
 }

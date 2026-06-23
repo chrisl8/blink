@@ -92,6 +92,7 @@ class SnippetsViewController: UIHostingController<SwiftUISnippetsView>, UIGestur
   var model: SearchModel!
   var tapGestureRecogninzer: UITapGestureRecognizer!
   var pendingOpenScratch: Bool = false
+  var pendingScratchPromptMode: Bool = false
   var hostingView: UIView?
 
   override func loadView() {
@@ -145,7 +146,8 @@ class SnippetsViewController: UIHostingController<SwiftUISnippetsView>, UIGestur
     self.model.inputView?.becomeFirstResponder()
     if pendingOpenScratch {
       pendingOpenScratch = false
-      self.model.openScratch()
+      self.model.openScratch(forcePromptMode: pendingScratchPromptMode)
+      pendingScratchPromptMode = false
     }
   }
   

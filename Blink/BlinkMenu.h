@@ -38,6 +38,7 @@ NS_ASSUME_NONNULL_BEGIN
 typedef NSString * BlinkActionID NS_TYPED_EXTENSIBLE_ENUM;
 
 extern const BlinkActionID BlinkActionSnippets;
+extern const BlinkActionID BlinkActionScratch;
 extern const BlinkActionID BlinkActionTabClose;
 extern const BlinkActionID BlinkActionTabCreate;
 extern const BlinkActionID BlinkActionLayoutMenu;
