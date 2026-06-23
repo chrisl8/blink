@@ -518,6 +518,24 @@ extension KBView: KBKeyViewDelegate {
       return
     }
 
+    if case .snippets = value {
+      UIApplication.shared.sendAction(
+        NSSelectorFromString("showSnippetsAction"), to: nil, from: nil, for: nil)
+      return
+    }
+
+    if case .prompt = value {
+      UIApplication.shared.sendAction(
+        NSSelectorFromString("showScratchPromptAction"), to: nil, from: nil, for: nil)
+      return
+    }
+
+    if case .quickActions = value {
+      UIApplication.shared.sendAction(
+        NSSelectorFromString("toggleQuickActionsAction"), to: nil, from: nil, for: nil)
+      return
+    }
+
     guard let keyInput = keyInput
     else {
       return

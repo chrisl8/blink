@@ -85,6 +85,9 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
   case hideKB
   case config
   case profileSwitch
+  case snippets
+  case prompt
+  case quickActions
   case text(value: String)
   case f(Int8)
   
@@ -106,11 +109,14 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
     case .hideKB: return "hideKB"
     case .config: return "config"
     case .profileSwitch: return "profileSwitch"
+    case .snippets: return "snippets"
+    case .prompt: return "prompt"
+    case .quickActions: return "quickActions"
     case .text(let value): return value
     case .f(let value): return "F\(value)"
     }
   }
-  
+
   var keyCode: KeyCode {
     switch self {
     case .cmd: return .commandLeft
@@ -173,6 +179,9 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
     case .paste: return "Paste"
     case .config: return "Settings"
     case .profileSwitch: return "Switch Profile"
+    case .snippets: return "Snippets"
+    case .prompt: return "Prompt"
+    case .quickActions: return "Quick Actions"
     case .tab: return "Tab"
     case .return: return "Return"
     case .up: return "Up"
@@ -225,10 +234,13 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
     case .hideKB: return "keyboard.chevron.compact.down"
     case .config: return "gearshape"
     case .profileSwitch: return "square.stack.3d.up"
+    case .snippets: return "chevron.left.square"
+    case .prompt: return "text.bubble"
+    case .quickActions: return "bolt.circle"
     default:     return nil
     }
   }
-  
+
   var alternateSymbolName: String? {
     switch self {
     case .left:  return "arrowtriangle.left.fill"
@@ -240,7 +252,7 @@ enum KBKeyValue: Hashable, Identifiable, Codable {
   }
   
   static var specials: [Self] {
-    [.cmd, .alt, .ctrl, .shift, .esc, .tab, .return, .left, .right, .up, .down, .copy, .paste, .hideKB, .config, .profileSwitch]
+    [.cmd, .alt, .ctrl, .shift, .esc, .tab, .return, .left, .right, .up, .down, .copy, .paste, .hideKB, .config, .profileSwitch, .snippets, .prompt, .quickActions]
   }
   
   var isModifier: Bool {

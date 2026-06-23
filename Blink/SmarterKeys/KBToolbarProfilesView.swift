@@ -319,6 +319,9 @@ struct KBToolbarProfileEditView: View {
         .icon(.copy, traits: .all),
         .icon(.paste, traits: .all),
         .icon(.hideKB, traits: .all),
+        .icon(.snippets, traits: .all),
+        .icon(.prompt, traits: .all),
+        .icon(.quickActions, traits: .all),
       ]))
     } else {
       groups.append(KeyGroup(id: "modifiers", title: "Modifiers & Actions", keys: [
@@ -330,6 +333,9 @@ struct KBToolbarProfileEditView: View {
         .icon(.copy, traits: .all),
         .icon(.paste, traits: .all),
         .icon(.hideKB, traits: .all),
+        .icon(.snippets, traits: .all),
+        .icon(.prompt, traits: .all),
+        .icon(.quickActions, traits: .all),
         .key(.ctrl, traits: .all),
         .key(.alt, traits: .all),
         .key(.cmd, traits: .all),
