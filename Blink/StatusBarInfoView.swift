@@ -94,6 +94,12 @@ class StatusBarInfoView: UIView {
   private var _prevNetSampleTime: Date?
   private var _rxRate: Double = 0
   private var _txRate: Double = 0
+  // Rolling history for the host-flank activity bars (oldest…newest).
+  private var _rxHistory: [Double] = []
+  private var _txHistory: [Double] = []
+  private let _historyCap = 48
+  private let rxBars = ThroughputBarsView()   // left of host (download)
+  private let txBars = ThroughputBarsView()   // right of host (upload)
   private var _pulseDuration: Double = 1.8
 
   // First-line change tracking (for animations)
@@ -167,7 +173,16 @@ class StatusBarInfoView: UIView {
     statusDot.layer.cornerRadius = dotSize / 2
     statusDot.backgroundColor = UIColor(red: 0.2, green: 0.9, blue: 0.4, alpha: 1.0)
 
+    // Activity bars that flank the host line (download left, upload right),
+    // coloured from an 80s synth palette with offset seeds so the two sides differ.
+    rxBars.seed = 0
+    txBars.seed = 2
+    rxBars.newestInnerEdge = .right  // newest bar nearest the host (its right edge)
+    txBars.newestInnerEdge = .left   // newest bar nearest the host (its left edge)
+
     addSubview(statusDot)
+    addSubview(rxBars)
+    addSubview(txBars)
     addSubview(hostLine)
     addSubview(leftLabel)
     addSubview(botLeftLabel)
@@ -753,6 +768,12 @@ class StatusBarInfoView: UIView {
     _rxRate = dRx / elapsed
     _txRate = dTx / elapsed
     _prevRxCounter = rx; _prevTxCounter = tx; _prevNetSampleTime = now
+
+    _rxHistory.append(_rxRate); _txHistory.append(_txRate)
+    if _rxHistory.count > _historyCap { _rxHistory.removeFirst() }
+    if _txHistory.count > _historyCap { _txHistory.removeFirst() }
+    rxBars.setSamples(_rxHistory)
+    txBars.setSamples(_txHistory)
     _updateDot()
   }
 
@@ -941,6 +962,8 @@ class StatusBarInfoView: UIView {
     leftLabel.isHidden = true
     botLeftLabel.isHidden = true
     statusDot.isHidden = true
+    rxBars.isHidden = true
+    txBars.isHidden = true
     for (_, l) in chipLabels { l.isHidden = true }
 
     let w = bounds.width
@@ -1049,6 +1072,33 @@ class StatusBarInfoView: UIView {
     hostLine.isHidden = false
     hostLine.frame = CGRect(x: 40, y: 0, width: max(bounds.width - 80, 0), height: 12)
 
+    // Throughput activity bars flank the centered host text. Place them in the
+    // gaps the title leaves; hide a side if its gap is too small.
+    let stripInset: CGFloat = 34   // clear of the rounded top corners
+    let textW = min(hostLine.intrinsicContentSize.width, hostLine.bounds.width)
+    let textLeft = hostLine.frame.midX - textW / 2
+    let textRight = hostLine.frame.midX + textW / 2
+    let barGap: CGFloat = 6
+    let barsY: CGFloat = 1, barsH: CGFloat = 10
+    let minBarsW: CGFloat = 16
+
+    let leftBarsW = (textLeft - barGap) - stripInset
+    if leftBarsW >= minBarsW {
+      rxBars.isHidden = false
+      rxBars.frame = CGRect(x: stripInset, y: barsY, width: leftBarsW, height: barsH)
+    } else {
+      rxBars.isHidden = true
+    }
+
+    let rightBarsStart = textRight + barGap
+    let rightBarsW = (bounds.width - stripInset) - rightBarsStart
+    if rightBarsW >= minBarsW {
+      txBars.isHidden = false
+      txBars.frame = CGRect(x: rightBarsStart, y: barsY, width: rightBarsW, height: barsH)
+    } else {
+      txBars.isHidden = true
+    }
+
     // Left column: both rows right-aligned to the Island edge. Top = window +
     // clock, bottom = date + uptime.
     let leftColWidth = max(leftZoneEnd - leftZoneStart, 0)
@@ -1144,6 +1194,74 @@ class StatusBarInfoView: UIView {
       } else {
         label.isHidden = true
       }
+    }
+  }
+}
+
+/// Tiny activity bars driven by a rolling history of values (oldest…newest).
+/// Auto-scales (sqrt against a rolling peak with a floor) so both faint and
+/// heavy traffic register. The newest sample is drawn nearest the inner edge
+/// (toward the host line) so activity appears to emanate from the title.
+private final class ThroughputBarsView: UIView {
+  enum InnerEdge { case left, right }
+
+  // 80s synth palette — no blue/green (those are used elsewhere in the bar).
+  private static let synthPalette: [UIColor] = [
+    UIColor(red: 1.00, green: 0.18, blue: 0.62, alpha: 0.9), // hot pink
+    UIColor(red: 0.85, green: 0.15, blue: 0.95, alpha: 0.9), // magenta
+    UIColor(red: 0.58, green: 0.22, blue: 1.00, alpha: 0.9), // electric purple
+    UIColor(red: 1.00, green: 0.45, blue: 0.10, alpha: 0.9), // sunset orange
+    UIColor(red: 1.00, green: 0.28, blue: 0.40, alpha: 0.9), // neon coral
+  ]
+
+  private var samples: [Double] = []
+  private var phase = 0
+  /// Per-view offset so the left/right flanks don't mirror identical colors.
+  var seed: Int = 0
+  var newestInnerEdge: InnerEdge = .right
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    backgroundColor = .clear
+    isUserInteractionEnabled = false
+    isOpaque = false
+    contentMode = .redraw
+  }
+
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  func setSamples(_ s: [Double]) {
+    samples = s
+    phase += 1            // gentle palette drift between samples (≈ every 4s)
+    setNeedsDisplay()
+  }
+
+  override func draw(_ rect: CGRect) {
+    guard !samples.isEmpty, let ctx = UIGraphicsGetCurrentContext() else { return }
+
+    let barW: CGFloat = 2, gap: CGFloat = 1
+    let unit = barW + gap
+    let capacity = max(Int(rect.width / unit), 1)
+    let shown = Array(samples.suffix(capacity))
+
+    // Rolling peak with an ~8 KB/s floor: idle stays a flat low line, bursts grow.
+    let peak = max(shown.max() ?? 1, 8192)
+    let palette = Self.synthPalette
+    let drift = phase / 4   // slow the hue shimmer down
+
+    // Draw by slot (0 = inner edge nearest the host) so the colour pattern is
+    // anchored to the view and bars rise/fall within it.
+    for slot in 0..<shown.count {
+      let v = shown[shown.count - 1 - slot]   // newest at the inner edge
+      let frac = CGFloat((max(v, 0) / peak).squareRoot())
+      let h = max(rect.height * min(frac, 1.0), 0.5)
+      let x = (newestInnerEdge == .right)
+        ? rect.width - CGFloat(slot + 1) * unit
+        : CGFloat(slot) * unit
+      // Scattered-but-stable palette index, nudged by the slow drift.
+      let ci = (slot * 7 + seed + drift) % palette.count
+      ctx.setFillColor(palette[ci].cgColor)
+      ctx.fill(CGRect(x: x, y: rect.height - h, width: barW, height: h))
     }
   }
 }
