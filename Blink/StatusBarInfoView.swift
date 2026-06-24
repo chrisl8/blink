@@ -87,6 +87,14 @@ class StatusBarInfoView: UIView {
   private var _rawTitle: String?
   private var _hostAlias: String?
 
+  // Live network throughput (device-wide, from OS interface counters — works
+  // regardless of mosh/ssh/local). Rates are bytes/sec.
+  private var _prevRxCounter: UInt64 = 0
+  private var _prevTxCounter: UInt64 = 0
+  private var _prevNetSampleTime: Date?
+  private var _rxRate: Double = 0
+  private var _txRate: Double = 0
+
   // First-line change tracking (for animations)
   private var _prevWindowIndex: Int = -1
   private var _prevWindowCount: Int = -1
@@ -212,6 +220,7 @@ class StatusBarInfoView: UIView {
   override func willMove(toSuperview newSuperview: UIView?) {
     super.willMove(toSuperview: newSuperview)
     if newSuperview != nil {
+      _resetThroughputBaseline()
       _startClockTimer()
       _startChipTimer()
       _startRotationTimer()
@@ -226,6 +235,7 @@ class StatusBarInfoView: UIView {
   }
 
   @objc private func _appWillEnterForeground() {
+    _resetThroughputBaseline()
     _startClockTimer()
     _startChipTimer()
     _startRotationTimer()
@@ -378,6 +388,7 @@ class StatusBarInfoView: UIView {
   // MARK: - First-line label building
 
   private func _rebuildLabels() {
+    _sampleThroughput()
     let now = Date()
     let cal = Calendar.current
     let curMinute = cal.component(.minute, from: now)
@@ -385,7 +396,7 @@ class StatusBarInfoView: UIView {
     _prevMinute = curMinute
 
     leftLabel.attributedText = _buildLeftAttributedString(now: now)
-    botLeftLabel.attributedText = _buildUptimeString()
+    botLeftLabel.attributedText = _buildBottomLeftString()
     hostLine.attributedText = _buildHostLineString()
 
     // Detect first-line value changes for animations
@@ -438,6 +449,15 @@ class StatusBarInfoView: UIView {
     result.append(NSAttributedString(
       string: timeStr,
       attributes: [.foregroundColor: _greenColor, .font: font]))
+
+    if let startTime = _sessionStartTime {
+      result.append(NSAttributedString(
+        string: " ↑",
+        attributes: [.foregroundColor: _dimColor, .font: font]))
+      result.append(NSAttributedString(
+        string: _formatUptime(since: startTime),
+        attributes: [.foregroundColor: _amberColor, .font: font]))
+    }
 
     return result
   }
@@ -497,9 +517,10 @@ class StatusBarInfoView: UIView {
     return result
   }
 
-  /// Left column, bottom row: date + session uptime ("06/23 ↑5m"). Date is
-  /// always present; uptime appears once a session has a start time.
-  private func _buildUptimeString() -> NSAttributedString {
+  /// Left column, bottom row: date + live network throughput
+  /// ("06/23 ▼1.2M ▲45K"). Throughput is device-wide bytes/sec (works for mosh,
+  /// ssh, anything) so you can spot the link "chugging" while idle.
+  private func _buildBottomLeftString() -> NSAttributedString {
     let result = NSMutableAttributedString()
     let font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
 
@@ -507,15 +528,32 @@ class StatusBarInfoView: UIView {
       string: _dateFormatter.string(from: Date()),
       attributes: [.foregroundColor: _primaryColor, .font: font]))
 
-    if let startTime = _sessionStartTime {
-      result.append(NSAttributedString(
-        string: "  ↑",
-        attributes: [.foregroundColor: _dimColor, .font: font]))
-      result.append(NSAttributedString(
-        string: _formatUptime(since: startTime),
-        attributes: [.foregroundColor: _amberColor, .font: font]))
-    }
+    result.append(NSAttributedString(
+      string: "  ▼",
+      attributes: [.foregroundColor: _dimColor, .font: font]))
+    result.append(NSAttributedString(
+      string: _formatRate(_rxRate),
+      attributes: [.foregroundColor: _cyanColor, .font: font]))
+    result.append(NSAttributedString(
+      string: " ▲",
+      attributes: [.foregroundColor: _dimColor, .font: font]))
+    result.append(NSAttributedString(
+      string: _formatRate(_txRate),
+      attributes: [.foregroundColor: _greenColor, .font: font]))
+
     return result
+  }
+
+  /// Compact per-second rate: 0B / 1.2K / 45K / 1.2M / 12M.
+  private func _formatRate(_ bytesPerSec: Double) -> String {
+    let bps = max(bytesPerSec, 0)
+    if bps < 1024 { return "\(Int(bps))B" }
+    if bps < 1024 * 1024 {
+      let k = bps / 1024
+      return k < 10 ? String(format: "%.1fK", k) : "\(Int(k))K"
+    }
+    let m = bps / (1024 * 1024)
+    return m < 10 ? String(format: "%.1fM", m) : "\(Int(m))M"
   }
 
   private func _formatUptime(since startTime: Date) -> String {
@@ -662,6 +700,57 @@ class StatusBarInfoView: UIView {
     else { str = String(format: "%.1fG", gb) }
     let sev = gb < 2 ? 1 : 0
     return ("DSK \(str)", sev)
+  }
+
+  // MARK: - Network throughput
+
+  /// Sum cumulative byte counters across the physical interfaces (WiFi `en*`,
+  /// cellular `pdp_ip*`) from the OS. This is below mosh/ssh, so it captures
+  /// all session traffic regardless of protocol.
+  private func _readNetCounters() -> (rx: UInt64, tx: UInt64) {
+    var rx: UInt64 = 0, tx: UInt64 = 0
+    var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&ifaddrPtr) == 0 else { return (0, 0) }
+    defer { freeifaddrs(ifaddrPtr) }
+
+    var ptr = ifaddrPtr
+    while let cur = ptr {
+      let ifa = cur.pointee
+      if let cName = ifa.ifa_name,
+         let name = String(validatingUTF8: cName),
+         name.hasPrefix("en") || name.hasPrefix("pdp_ip"),
+         let addr = ifa.ifa_addr, addr.pointee.sa_family == UInt8(AF_LINK),
+         let dataPtr = ifa.ifa_data {
+        let data = dataPtr.assumingMemoryBound(to: if_data.self).pointee
+        rx += UInt64(data.ifi_ibytes)
+        tx += UInt64(data.ifi_obytes)
+      }
+      ptr = ifa.ifa_next
+    }
+    return (rx, tx)
+  }
+
+  /// Re-baseline so the first sample after (re)appearing doesn't average a
+  /// long background gap into a bogus rate.
+  private func _resetThroughputBaseline() {
+    _prevNetSampleTime = nil
+  }
+
+  private func _sampleThroughput() {
+    let now = Date()
+    let (rx, tx) = _readNetCounters()
+    guard let prev = _prevNetSampleTime else {
+      _prevRxCounter = rx; _prevTxCounter = tx; _prevNetSampleTime = now
+      return
+    }
+    let elapsed = now.timeIntervalSince(prev)
+    guard elapsed >= 1.0 else { return }  // smooth: ignore sub-second resamples
+    // 32-bit counters can wrap; treat a decrease as 0 for that interval.
+    let dRx = rx >= _prevRxCounter ? Double(rx - _prevRxCounter) : 0
+    let dTx = tx >= _prevTxCounter ? Double(tx - _prevTxCounter) : 0
+    _rxRate = dRx / elapsed
+    _txRate = dTx / elapsed
+    _prevRxCounter = rx; _prevTxCounter = tx; _prevNetSampleTime = now
   }
 
   // MARK: - Chip refresh & animation
