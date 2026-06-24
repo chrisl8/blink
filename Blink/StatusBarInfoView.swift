@@ -94,6 +94,7 @@ class StatusBarInfoView: UIView {
   private var _prevNetSampleTime: Date?
   private var _rxRate: Double = 0
   private var _txRate: Double = 0
+  private var _pulseDuration: Double = 1.8
 
   // First-line change tracking (for animations)
   private var _prevWindowIndex: Int = -1
@@ -592,7 +593,7 @@ class StatusBarInfoView: UIView {
     let anim = CABasicAnimation(keyPath: "opacity")
     anim.fromValue = 1.0
     anim.toValue = 0.3
-    anim.duration = _isRunningCmd ? 0.5 : 1.8
+    anim.duration = _pulseDuration
     anim.autoreverses = true
     anim.repeatCount = .infinity
     anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -626,6 +627,7 @@ class StatusBarInfoView: UIView {
         guard let self = self else { return }
         self.netStatusString = str
         self.netStatusSeverity = sev
+        self._updateDot()
         self._refreshChips(animate: true)
       }
     }
@@ -751,6 +753,29 @@ class StatusBarInfoView: UIView {
     _rxRate = dRx / elapsed
     _txRate = dTx / elapsed
     _prevRxCounter = rx; _prevTxCounter = tx; _prevNetSampleTime = now
+    _updateDot()
+  }
+
+  /// Dot color = network reachability (green up / red down); pulse speed scales
+  /// with live throughput so it calms when idle and races when the link is busy.
+  private func _updateDot() {
+    let down = netStatusSeverity >= 2
+    statusDot.backgroundColor = down
+      ? UIColor(red: 1.0, green: 0.35, blue: 0.35, alpha: 1.0)
+      : UIColor(red: 0.2, green: 0.9, blue: 0.4, alpha: 1.0)
+
+    let total = _rxRate + _txRate
+    let dur: Double
+    if total < 2048 {
+      dur = 1.8
+    } else {
+      let f = min(total / (512 * 1024), 1.0)  // 512 KB/s → fastest
+      dur = 1.8 - 1.4 * f
+    }
+    if abs(dur - _pulseDuration) > 0.06 {
+      _pulseDuration = dur
+      _startPulseAnimation()
+    }
   }
 
   // MARK: - Chip refresh & animation
