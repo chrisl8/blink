@@ -34,10 +34,28 @@ import Network
 
 class StatusBarInfoView: UIView {
 
-  // MARK: - First-line views
+  // MARK: - Info-grid views
+  //
+  // The Dynamic Island sits in the dead center. Usable regions (measured on
+  // iPhone 16 Pro Max — see _layoutDebugRuler notes):
+  //   • Status band: 62pt tall, full width, drawable from y=0.
+  //   • Island pill: x≈165–282 (≈125pt, centered on 220), y≈13–53.
+  //   • Above-Island strip (y0–12): clear in the CENTER only; far corners are
+  //     clipped by the rounded screen — keep content centered there.
+  //   • Two side columns (x16–150 / x290–424) are clear of the pill at any y.
+  //   • Bottom ~7pt is shared with scrolled terminal text (tested-OK margin).
+  //
+  // Layout:
+  //                ≡alias  user@host                 hostLine (above Island)
+  //   ● ▸1/2 │ clock   ▕ISLAND▏   BAT  NET           left col / right col chips
+  //     ↑uptime        ▕ISLAND▏   THM→SYS→DAT→DSK     left col / right col rot.
+  //
+  // Left column = blink/session, right column = phone chips, host spans the
+  // full-width strip above the Island.
 
-  private let leftLabel = UILabel()
-  private let rightLabel = UILabel()
+  private let hostLine = UILabel()       // above Island, centered (alias + host)
+  private let leftLabel = UILabel()      // left col, top row: window + clock
+  private let botLeftLabel = UILabel()   // left col, bottom row: session uptime
   private let statusDot = UIView()
 
   private let horizontalMargin: CGFloat = 16
@@ -78,12 +96,28 @@ class StatusBarInfoView: UIView {
   // MARK: - Status chips
 
   private enum ChipKind: Int, CaseIterable {
-    case battery, network, memory, thermal, sysUptime, date
+    case battery, network, thermal, sysUptime, date, diskFree
   }
+
+  // Always-visible chips (left zone) vs. the slowly-cycling set (right zone).
+  private let _fixedKinds: [ChipKind] = [.battery, .network]
+  private let _rotatingKinds: [ChipKind] = [.thermal, .sysUptime, .diskFree]
 
   private var chipLabels: [ChipKind: UILabel] = [:]
   private var chipValues: [ChipKind: String] = [:]
   private var chipSeverity: [ChipKind: Int] = [:]
+
+  // Rotation state for the right-zone slot
+  private var _rotationTimer: Timer?
+  private var _rotationIndex: Int = 0
+  private var _rotationPinned: Bool = false  // held on a critical reading
+  private let _rotationInterval: TimeInterval = 5.0
+
+  // TEMPORARY: calibration overlay to map the visible region vs. the Dynamic
+  // Island in a screenshot. Flip to false (or delete this block + the method
+  // + the early-return in layoutSubviews) once the real layout is dialed in.
+  private let _debugLayout = false
+  private var _debugViews: [UIView] = []
 
   private let netMonitor = NWPathMonitor()
   private var netStatusString: String = "..."
@@ -105,19 +139,29 @@ class StatusBarInfoView: UIView {
 
     let font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
 
+    // Host line sits above the Island, centered, slightly smaller to fit the
+    // ~12pt strip. Truncates the head so the host (tail) stays readable.
+    hostLine.font = UIFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+    hostLine.textAlignment = .center
+    hostLine.lineBreakMode = .byTruncatingHead
+
+    // Left column hugs the Island (right-aligned) so its content sits beside
+    // the pill rather than stranded at the screen edge.
     leftLabel.font = font
+    leftLabel.textAlignment = .right
     leftLabel.lineBreakMode = .byTruncatingTail
 
-    rightLabel.font = font
-    rightLabel.textAlignment = .right
-    rightLabel.lineBreakMode = .byTruncatingTail
+    botLeftLabel.font = font
+    botLeftLabel.textAlignment = .right
+    botLeftLabel.lineBreakMode = .byTruncatingTail
 
     statusDot.layer.cornerRadius = dotSize / 2
     statusDot.backgroundColor = UIColor(red: 0.2, green: 0.9, blue: 0.4, alpha: 1.0)
 
     addSubview(statusDot)
+    addSubview(hostLine)
     addSubview(leftLabel)
-    addSubview(rightLabel)
+    addSubview(botLeftLabel)
 
     // Build chip labels
     let chipFont = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
@@ -160,6 +204,7 @@ class StatusBarInfoView: UIView {
   deinit {
     _clockTimer?.invalidate()
     _chipTimer?.invalidate()
+    _rotationTimer?.invalidate()
     netMonitor.cancel()
     NotificationCenter.default.removeObserver(self)
   }
@@ -169,18 +214,21 @@ class StatusBarInfoView: UIView {
     if newSuperview != nil {
       _startClockTimer()
       _startChipTimer()
+      _startRotationTimer()
       _startPulseAnimation()
       _refreshChips(animate: false)
       _startChipBaselineAnimation()
     } else {
       _clockTimer?.invalidate(); _clockTimer = nil
       _chipTimer?.invalidate(); _chipTimer = nil
+      _rotationTimer?.invalidate(); _rotationTimer = nil
     }
   }
 
   @objc private func _appWillEnterForeground() {
     _startClockTimer()
     _startChipTimer()
+    _startRotationTimer()
     _startPulseAnimation()
     _refreshChips(animate: false)
     _startChipBaselineAnimation()
@@ -190,6 +238,7 @@ class StatusBarInfoView: UIView {
   @objc private func _appDidEnterBackground() {
     _clockTimer?.invalidate(); _clockTimer = nil
     _chipTimer?.invalidate(); _chipTimer = nil
+    _rotationTimer?.invalidate(); _rotationTimer = nil
   }
 
   @objc private func _chipEventNotification() {
@@ -287,10 +336,6 @@ class StatusBarInfoView: UIView {
       return _isLightBg
         ? UIColor(red: 0.0, green: 0.5, blue: 0.6, alpha: 0.85)
         : UIColor(red: 0.4, green: 0.85, blue: 1.0, alpha: 0.78)
-    case .memory:
-      return _isLightBg
-        ? UIColor(red: 0.5, green: 0.25, blue: 0.65, alpha: 0.85)
-        : UIColor(red: 0.85, green: 0.6, blue: 1.0, alpha: 0.78)
     case .thermal:
       return _isLightBg
         ? UIColor(red: 0.55, green: 0.45, blue: 0.05, alpha: 0.85)
@@ -303,6 +348,10 @@ class StatusBarInfoView: UIView {
       return _isLightBg
         ? UIColor(red: 0.4, green: 0.3, blue: 0.55, alpha: 0.8)
         : UIColor(red: 0.78, green: 0.72, blue: 1.0, alpha: 0.75)
+    case .diskFree:
+      return _isLightBg
+        ? UIColor(red: 0.2, green: 0.45, blue: 0.5, alpha: 0.85)
+        : UIColor(red: 0.55, green: 0.9, blue: 0.9, alpha: 0.78)
     }
   }
 
@@ -336,7 +385,8 @@ class StatusBarInfoView: UIView {
     _prevMinute = curMinute
 
     leftLabel.attributedText = _buildLeftAttributedString(now: now)
-    rightLabel.attributedText = _buildRightAttributedString()
+    botLeftLabel.attributedText = _buildUptimeString()
+    hostLine.attributedText = _buildHostLineString()
 
     // Detect first-line value changes for animations
     let countChanged = (_windowCount != _prevWindowCount && _prevWindowCount != -1)
@@ -354,7 +404,7 @@ class StatusBarInfoView: UIView {
       _flashLabel(leftLabel, scale: 1.04)
     }
     if hostChanged {
-      _flashLabel(rightLabel, scale: 1.18)
+      _flashLabel(hostLine, scale: 1.18)
     }
   }
 
@@ -377,14 +427,11 @@ class StatusBarInfoView: UIView {
 
     if _windowCount > 1 {
       result.append(NSAttributedString(
-        string: "▸ ",
+        string: "▸",
         attributes: [.foregroundColor: _dimColor, .font: font]))
       result.append(NSAttributedString(
-        string: "\(_windowIndex)/\(_windowCount)",
+        string: "\(_windowIndex)/\(_windowCount) ",
         attributes: [.foregroundColor: _amberColor, .font: font]))
-      result.append(NSAttributedString(
-        string: " │ ",
-        attributes: [.foregroundColor: _dimColor, .font: font]))
     }
 
     let timeStr = _clockFormatter.string(from: now)
@@ -395,9 +442,11 @@ class StatusBarInfoView: UIView {
     return result
   }
 
-  private func _buildRightAttributedString() -> NSAttributedString {
+  /// The full-width line above the Island: "≡alias  user@host". Smaller font
+  /// to fit the ~12pt strip; centered so it stays clear of the corner curves.
+  private func _buildHostLineString() -> NSAttributedString {
     let result = NSMutableAttributedString()
-    let font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+    let font = UIFont.monospacedSystemFont(ofSize: 9, weight: .medium)
 
     let hasAlias = _hostAlias != nil
     let aliasMatchesHost: Bool = {
@@ -414,59 +463,58 @@ class StatusBarInfoView: UIView {
         attributes: [.foregroundColor: _greenColor, .font: font]))
     }
 
-    let userColor = hasAlias ? _purpleColor.withAlphaComponent(0.55) : _purpleColor
-    let hostColor = hasAlias ? _cyanColor.withAlphaComponent(0.55) : _cyanColor
-
     if let user = _parsedUser, let host = _parsedHost {
       if hasAlias {
         result.append(NSAttributedString(
-          string: " ",
-          attributes: [.foregroundColor: _dimColor, .font: font]))
+          string: "  ", attributes: [.font: font]))
       }
       result.append(NSAttributedString(
         string: user,
-        attributes: [.foregroundColor: userColor, .font: font]))
+        attributes: [.foregroundColor: _purpleColor, .font: font]))
       if !aliasMatchesHost {
         result.append(NSAttributedString(
           string: "@",
           attributes: [.foregroundColor: _dimColor, .font: font]))
         result.append(NSAttributedString(
           string: host,
-          attributes: [.foregroundColor: hostColor, .font: font]))
+          attributes: [.foregroundColor: _cyanColor, .font: font]))
       }
     } else if let host = _parsedHost, !aliasMatchesHost {
       if hasAlias {
         result.append(NSAttributedString(
-          string: " ",
-          attributes: [.foregroundColor: _dimColor, .font: font]))
+          string: "  ", attributes: [.font: font]))
       }
       result.append(NSAttributedString(
         string: host,
-        attributes: [.foregroundColor: hostColor, .font: font]))
+        attributes: [.foregroundColor: _cyanColor, .font: font]))
     } else if !hasAlias {
-      let fallback: String
-      if let title = _rawTitle, !title.isEmpty {
-        fallback = title
-      } else {
-        fallback = "blink"
-      }
+      let fallback = (_rawTitle?.isEmpty == false) ? _rawTitle! : "blink"
       result.append(NSAttributedString(
         string: fallback,
         attributes: [.foregroundColor: _cyanColor, .font: font]))
     }
 
+    return result
+  }
+
+  /// Left column, bottom row: date + session uptime ("06/23 ↑5m"). Date is
+  /// always present; uptime appears once a session has a start time.
+  private func _buildUptimeString() -> NSAttributedString {
+    let result = NSMutableAttributedString()
+    let font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+
+    result.append(NSAttributedString(
+      string: _dateFormatter.string(from: Date()),
+      attributes: [.foregroundColor: _primaryColor, .font: font]))
+
     if let startTime = _sessionStartTime {
       result.append(NSAttributedString(
-        string: " │ ",
-        attributes: [.foregroundColor: _dimColor, .font: font]))
-      result.append(NSAttributedString(
-        string: "↑",
+        string: "  ↑",
         attributes: [.foregroundColor: _dimColor, .font: font]))
       result.append(NSAttributedString(
         string: _formatUptime(since: startTime),
         attributes: [.foregroundColor: _amberColor, .font: font]))
     }
-
     return result
   }
 
@@ -568,24 +616,6 @@ class StatusBarInfoView: UIView {
     return ("NET \(netStatusString)", netStatusSeverity)
   }
 
-  private func _readMemory() -> (String, Int) {
-    var info = mach_task_basic_info()
-    var count = mach_msg_type_number_t(
-      MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
-    let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
-      $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-        task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
-      }
-    }
-    guard kerr == KERN_SUCCESS else { return ("MEM --", 0) }
-    let mb = Int(info.resident_size / (1024 * 1024))
-    let sev: Int
-    if mb >= 800 { sev = 2 }
-    else if mb >= 500 { sev = 1 }
-    else { sev = 0 }
-    return ("MEM \(mb)M", sev)
-  }
-
   private func _readThermal() -> (String, Int) {
     let s = ProcessInfo.processInfo.thermalState
     switch s {
@@ -618,16 +648,34 @@ class StatusBarInfoView: UIView {
     return ("DAT \(_dateFormatter.string(from: Date()))", 0)
   }
 
+  private func _readDiskFree() -> (String, Int) {
+    let url = URL(fileURLWithPath: NSHomeDirectory())
+    guard let vals = try? url.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+          let bytes = vals.volumeAvailableCapacityForImportantUsage else {
+      return ("DSK --", 0)
+    }
+    let gb = Double(bytes) / 1_000_000_000.0
+    let str: String
+    if gb >= 100 { str = "\(Int(gb))G" }
+    else if gb >= 10 { str = "\(Int(gb))G" }
+    else { str = String(format: "%.1fG", gb) }
+    let sev = gb < 2 ? 1 : 0
+    return ("DSK \(str)", sev)
+  }
+
   // MARK: - Chip refresh & animation
 
   private func _refreshChips(animate: Bool) {
+
+
     let readings: [(ChipKind, (String, Int))] = [
       (.battery,   _readBattery()),
       (.network,   _readNetwork()),
-      (.memory,    _readMemory()),
       (.thermal,   _readThermal()),
       (.sysUptime, _readSysUptime()),
       (.date,      _readDate()),
+      (.diskFree,  _readDiskFree()),
     ]
 
     var widthDirty = false
@@ -643,7 +691,9 @@ class StatusBarInfoView: UIView {
 
       if valueChanged { widthDirty = true }
 
-      if animate && (valueChanged || sevChanged) && !prevVal.isEmpty {
+      // Only flash chips the user can actually see (hidden rotating slots
+      // surface via the fade transition when they next come around).
+      if animate && (valueChanged || sevChanged) && !prevVal.isEmpty && !label.isHidden {
         _flashChip(label, severity: sev)
       }
 
@@ -651,8 +701,58 @@ class StatusBarInfoView: UIView {
       chipSeverity[kind] = sev
     }
 
+    if _applyRotationPinning() { widthDirty = true }
+
     if widthDirty {
       setNeedsLayout()
+    }
+  }
+
+  /// If a rotating reading is critical (severity ≥ 2), pin the slot to it so a
+  /// real warning can't be hidden behind the cycle. Returns true if the visible
+  /// rotating kind changed as a result.
+  private func _applyRotationPinning() -> Bool {
+    let sevs = _rotatingKinds.map { chipSeverity[$0] ?? 0 }
+    guard let maxSev = sevs.max() else { _rotationPinned = false; return false }
+    if maxSev >= 2, let idx = sevs.firstIndex(of: maxSev) {
+      _rotationPinned = true
+      if idx != _rotationIndex {
+        _rotationIndex = idx
+        _applyRotationTransition()
+        return true
+      }
+      return false
+    }
+    _rotationPinned = false
+    return false
+  }
+
+  // MARK: - Rotation
+
+  private func _startRotationTimer() {
+    _rotationTimer?.invalidate()
+    _rotationTimer = Timer.scheduledTimer(
+      withTimeInterval: _rotationInterval, repeats: true) { [weak self] _ in
+      self?._advanceRotation()
+    }
+  }
+
+  private func _advanceRotation() {
+    guard _rotatingKinds.count > 1, !_rotationPinned else { return }
+    _rotationIndex = (_rotationIndex + 1) % _rotatingKinds.count
+    _applyRotationTransition()
+    setNeedsLayout()
+    layoutIfNeeded()
+  }
+
+  /// Cross-fade the right-zone slot as the visible kind swaps.
+  private func _applyRotationTransition() {
+    for kind in _rotatingKinds {
+      guard let label = chipLabels[kind] else { continue }
+      let t = CATransition()
+      t.duration = 0.5
+      t.type = .fade
+      label.layer.add(t, forKey: "rotateFade")
     }
   }
 
@@ -693,8 +793,10 @@ class StatusBarInfoView: UIView {
   private func _startChipBaselineAnimation() {
     // Subtle staggered breathing — keeps the row feeling alive without
     // the busy-ness of the old scan/drift HUD.
+    // Only the always-visible chips breathe; rotating slots toggle visibility
+    // via opacity, so a repeating opacity animation there would fight the fade.
     let now = CACurrentMediaTime()
-    for (i, kind) in ChipKind.allCases.enumerated() {
+    for (i, kind) in _fixedKinds.enumerated() {
       guard let label = chipLabels[kind] else { continue }
       label.layer.removeAnimation(forKey: "breathe")
       let anim = CABasicAnimation(keyPath: "opacity")
@@ -710,15 +812,104 @@ class StatusBarInfoView: UIView {
     }
   }
 
+  // MARK: - Debug calibration overlay (TEMPORARY)
+
+  /// Fills the entire view region with a coordinate grid so a screenshot
+  /// reveals exactly which pixels are visible vs. occluded by the Dynamic
+  /// Island and the rounded screen corners. The Island renders as an opaque
+  /// black pill over this grid — read its edges off the rulers.
+  private func _layoutDebugRuler() {
+    _debugViews.forEach { $0.removeFromSuperview() }
+    _debugViews.removeAll()
+
+    // Hide all normal content while testing.
+    hostLine.isHidden = true
+    leftLabel.isHidden = true
+    botLeftLabel.isHidden = true
+    statusDot.isHidden = true
+    for (_, l) in chipLabels { l.isHidden = true }
+
+    let w = bounds.width
+    let h = bounds.height
+
+    func add(_ v: UIView) { addSubview(v); _debugViews.append(v) }
+
+    // Full-bleed translucent fill: shows how far into the corners we can draw.
+    let bg = UIView(frame: bounds)
+    bg.backgroundColor = UIColor.systemTeal.withAlphaComponent(0.20)
+    add(bg)
+
+    let font = UIFont.monospacedSystemFont(ofSize: 7, weight: .bold)
+
+    // Horizontal rules + y markers (left / center / right) every 6px.
+    var y: CGFloat = 0
+    while y <= h {
+      let line = UIView(frame: CGRect(x: 0, y: y, width: w, height: 0.5))
+      line.backgroundColor = UIColor.white.withAlphaComponent(0.30)
+      add(line)
+
+      let positions: [(NSTextAlignment, CGFloat)] = [
+        (.left, 1), (.center, w / 2 - 16), (.right, w - 33),
+      ]
+      for (align, x) in positions {
+        let lbl = UILabel(frame: CGRect(x: x, y: y - 4, width: 32, height: 8))
+        lbl.font = font
+        lbl.textColor = .white
+        lbl.textAlignment = align
+        lbl.text = "y\(Int(y))"
+        add(lbl)
+      }
+      y += 6
+    }
+
+    // Vertical ticks + x markers every 30px along the bottom edge.
+    var x: CGFloat = 0
+    while x <= w {
+      let tick = UIView(frame: CGRect(x: x, y: 0, width: 0.5, height: h))
+      tick.backgroundColor = UIColor.white.withAlphaComponent(0.18)
+      add(tick)
+
+      let lbl = UILabel(frame: CGRect(x: x + 1, y: h - 9, width: 28, height: 8))
+      lbl.font = font
+      lbl.textColor = .yellow
+      lbl.text = "\(Int(x))"
+      add(lbl)
+      x += 30
+    }
+
+    // Real sample chip text at the very top row — does it read beside/over
+    // the Island?
+    let sampleFont = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+    let topLeft = UILabel(frame: CGRect(x: 4, y: 0, width: w / 2 - 4, height: 13))
+    topLeft.font = sampleFont
+    topLeft.textColor = .green
+    topLeft.text = "BAT 88%↑ NET wifi"
+    add(topLeft)
+
+    let topRight = UILabel(frame: CGRect(x: w / 2, y: 0, width: w / 2 - 4, height: 13))
+    topRight.font = sampleFont
+    topRight.textColor = .green
+    topRight.textAlignment = .right
+    topRight.text = "THM ok SYS 23d20h"
+    add(topRight)
+  }
+
   // MARK: - Layout
 
   override func layoutSubviews() {
     super.layoutSubviews()
 
+    if _debugLayout {
+      _layoutDebugRuler()
+      return
+    }
+
     let device = DeviceInfo.shared()
+    // Width of the dead center to keep clear. For the Island this is wider than
+    // the pill (≈125pt) so text never tucks under its rounded ends.
     let centerExclusion: CGFloat
     if device.hasDynamicIsland {
-      centerExclusion = 125
+      centerExclusion = 150
     } else if device.hasNotch {
       centerExclusion = 215
     } else {
@@ -727,59 +918,76 @@ class StatusBarInfoView: UIView {
 
     let halfExclusion = centerExclusion / 2
     let midX = bounds.width / 2
-    let labelHeight: CGFloat = 16
-    let labelY = bounds.height - labelHeight - 7
 
-    // Status dot — left edge, vertically centered with first-line labels
-    let dotX = horizontalMargin
-    let dotY = labelY + (labelHeight - dotSize) / 2
-    statusDot.frame = CGRect(x: dotX, y: dotY, width: dotSize, height: dotSize)
-
-    // First-line left
-    let leftX = dotX + dotSize + 6
-    let leftWidth = midX - halfExclusion - leftX
-    leftLabel.frame = CGRect(
-      x: leftX, y: labelY,
-      width: max(leftWidth, 0), height: labelHeight)
-
-    // First-line right
-    let rightX = midX + halfExclusion
-    let rightWidth = midX - halfExclusion - horizontalMargin
-    rightLabel.frame = CGRect(
-      x: rightX, y: labelY,
-      width: max(rightWidth, 0), height: labelHeight)
-
-    // Chip row — fills the area above first line, splitting around any
-    // center exclusion (Dynamic Island / notch).
-    let chipHeight: CGFloat = 14
-    let chipY = labelY - chipHeight - 3
-
-    if chipY < 2 {
-      for (_, l) in chipLabels { l.isHidden = true }
-      return
-    }
-
-    let allChips = ChipKind.allCases
-    let half = allChips.count / 2
-    let leftChips = Array(allChips.prefix(half))
-    let rightChips = Array(allChips.suffix(allChips.count - half))
+    // Two stacked rows in the side columns. Bottom row keeps its long-tested
+    // 7pt margin; the top row stacks just above it.
+    let rowHeight: CGFloat = 15
+    let bottomRowY = bounds.height - rowHeight - 7
+    let topRowY = bottomRowY - rowHeight - 2
 
     let leftZoneStart = horizontalMargin
     let leftZoneEnd = midX - halfExclusion - 4
     let rightZoneStart = midX + halfExclusion + 4
     let rightZoneEnd = bounds.width - horizontalMargin
 
-    _layoutChipRow(leftChips,
-                   from: leftZoneStart, to: leftZoneEnd,
-                   y: chipY, height: chipHeight)
-    _layoutChipRow(rightChips,
-                   from: rightZoneStart, to: rightZoneEnd,
-                   y: chipY, height: chipHeight)
+    // Host line: full-width strip above the Island, centered. Inset from the
+    // far corners (rounded-corner clipping) and kept above the pill (y≈13).
+    hostLine.isHidden = false
+    hostLine.frame = CGRect(x: 40, y: 0, width: max(bounds.width - 80, 0), height: 12)
+
+    // Left column: both rows right-aligned to the Island edge. Top = window +
+    // clock, bottom = date + uptime.
+    let leftColWidth = max(leftZoneEnd - leftZoneStart, 0)
+    leftLabel.frame = CGRect(
+      x: leftZoneStart, y: topRowY, width: leftColWidth, height: rowHeight)
+    botLeftLabel.frame = CGRect(
+      x: leftZoneStart, y: bottomRowY, width: leftColWidth, height: rowHeight)
+
+    // Activity dot rides just left of the (right-aligned) clock text.
+    let topTextW = min(leftLabel.intrinsicContentSize.width, leftColWidth)
+    let dotX = max(leftZoneEnd - topTextW - dotSize - 5, leftZoneStart)
+    statusDot.isHidden = false
+    statusDot.frame = CGRect(
+      x: dotX, y: topRowY + (rowHeight - dotSize) / 2,
+      width: dotSize, height: dotSize)
+
+    // Right column (phone): fixed chips on top, two staggered rotating metrics
+    // spread across the bottom (matches the top row's fullness, more dynamic).
+    if rightZoneEnd - rightZoneStart >= 30 {
+      _layoutChipRow(_fixedKinds,
+                     from: rightZoneStart, to: rightZoneEnd,
+                     y: topRowY, height: rowHeight, justified: false)
+      _layoutRotatingPair(from: rightZoneStart, to: rightZoneEnd,
+                          y: bottomRowY, height: rowHeight)
+    } else {
+      for (_, l) in chipLabels { l.isHidden = true }
+    }
   }
 
+  /// Shows two consecutive rotating metrics at once, spread across the zone,
+  /// cycling so each metric slides through over time.
+  private func _layoutRotatingPair(
+    from start: CGFloat, to end: CGFloat, y: CGFloat, height: CGFloat
+  ) {
+    let n = _rotatingKinds.count
+    guard n > 0 else { return }
+    let i = _rotationIndex % n
+    var visible = [_rotatingKinds[i]]
+    if n > 1 { visible.append(_rotatingKinds[(i + 1) % n]) }
+
+    for kind in _rotatingKinds where !visible.contains(kind) {
+      chipLabels[kind]?.isHidden = true
+    }
+    _layoutChipRow(visible, from: start, to: end, y: y, height: height)
+  }
+
+  /// Lays out chips left-to-right in a zone, dropping any that don't fit.
+  /// - justified: spread to fill the zone edge-to-edge (extra space → gaps).
+  ///   When false, chips pack with a fixed gap and the group is centered, so
+  ///   short chips sit together instead of being flung to the zone edges.
   private func _layoutChipRow(
     _ chips: [ChipKind], from start: CGFloat, to end: CGFloat,
-    y: CGFloat, height: CGFloat
+    y: CGFloat, height: CGFloat, justified: Bool = true
   ) {
     let zoneWidth = end - start
     if zoneWidth < 30 {
@@ -791,8 +999,9 @@ class StatusBarInfoView: UIView {
       chipLabels[kind]?.intrinsicContentSize.width ?? 0
     }
 
+    let minGap: CGFloat = justified ? 6 : 14
+
     // Greedy fit from left: drop trailing chips that don't fit
-    let minGap: CGFloat = 6
     var visibleCount = 0
     var totalUsed: CGFloat = 0
     for w in widths {
@@ -802,10 +1011,16 @@ class StatusBarInfoView: UIView {
       visibleCount += 1
     }
 
-    let extra = zoneWidth - totalUsed
-    let gap: CGFloat = visibleCount > 1 ? minGap + extra / CGFloat(visibleCount - 1) : minGap
-
+    let gap: CGFloat
     var x = start
+    if justified {
+      let extra = zoneWidth - totalUsed
+      gap = visibleCount > 1 ? minGap + extra / CGFloat(visibleCount - 1) : minGap
+    } else {
+      gap = minGap
+      x = start + (zoneWidth - totalUsed) / 2  // center the packed group
+    }
+
     for (i, kind) in chips.enumerated() {
       guard let label = chipLabels[kind] else { continue }
       if i < visibleCount {
