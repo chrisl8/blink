@@ -495,6 +495,24 @@ Please go to your subscriptions and cancel one of them!
     }
   }
   
+  /// Cleans up a tab whose session has already finished/died, without touching the
+  /// currently displayed tab or animating a page transition. Needed because a mosh
+  /// session can hang up while its tab is in the background; if left in place the tab
+  /// lingers with no live session behind it, so it becomes an unresponsive dead tab
+  /// once the user swipes to it (and would keep coming back after relaunch/reboot,
+  /// since `_viewportsKeys` is persisted).
+  private func _removeSpace(_ term: TermController) {
+    let key = term.meta.key
+    guard let idx = _viewportsKeys.firstIndex(of: key) else {
+      return
+    }
+    term.delegate = nil
+    SessionRegistry.shared.remove(forKey: key)
+    _sessionStartTimes.removeValue(forKey: key)
+    _viewportsKeys.remove(at: idx)
+    _displayHUD()
+  }
+
   @objc func _focusOnShell() {
     _attachInputToCurrentTerm()
   }
@@ -679,6 +697,8 @@ extension SpaceController: TermControlDelegate {
   func terminalHangup(control: TermController) {
     if currentTerm() == control {
       _closeCurrentSpace()
+    } else {
+      _removeSpace(control)
     }
   }
   
