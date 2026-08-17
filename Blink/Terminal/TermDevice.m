@@ -31,6 +31,21 @@
 
 #import "TermDevice.h"
 
+// Mosh's own "connection lost" bar (drawn by mosh's NotificationEngine, see
+// terminaloverlay.cc in mobile-shell/mosh) writes one of these two literal
+// strings into the terminal output once the client hasn't heard from the
+// server for a while. Mosh keeps redrawing it (with an updated elapsed-time
+// count) roughly every few seconds for as long as it stays disconnected, and
+// stops once it reconnects. There is no other signal available to Blink for
+// "the reconnect bar is showing" - the mosh bridge only exposes a
+// state_callback used for suspend/resume - so we detect it by matching the
+// text that mosh itself writes to the pty stream.
+static NSString * const kMoshDisconnectNoticeContact = @"mosh: Last contact";
+static NSString * const kMoshDisconnectNoticeReply = @"mosh: Last reply";
+// How long to let the bar stay up (from when it first appears) before we
+// give up on it ever reconnecting and close the tab ourselves.
+static const NSTimeInterval kMoshAutoCloseGracePeriod = 10.0;
+
 static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
   // Find the first UTF mark and compare with the iterator.
   int i = 1;
@@ -61,8 +76,15 @@ static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
   return 0;
 }
 
+@class TermDevice;
+
+@interface TermDevice (MoshDisconnectDetection)
+- (void)_checkOutputForMoshDisconnectNotice:(NSString *)output;
+@end
+
 @interface ViewStream: NSObject
   @property TermView *view;
+  @property (weak) TermDevice *device;
 @end
 
 @implementation ViewStream {
@@ -104,6 +126,7 @@ static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
     
     // Best case. We got good utf8 seq.
     if (output) {
+      [_device _checkOutputForMoshDisconnectNotice:output];
       [_view write:output];
       return;
     }
@@ -127,6 +150,7 @@ static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
     output = [[NSString alloc] initWithBytes:buffer length:len - incompleteSize encoding:NSUTF8StringEncoding];
     if (output) {
       // Good seq. Write it as string.
+      [_device _checkOutputForMoshDisconnectNotice:output];
       [_view write:output];
       return;
     }
@@ -158,9 +182,12 @@ static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
   
   ViewStream *_outStream;
   ViewStream *_errStream;
-  
+
   dispatch_semaphore_t _readlineSema;
   NSString *_readlineResult;
+
+  BOOL _moshNoticeHandled;
+  NSTimer *_moshNoticeCheckTimer;
 }
 
 // Make win accesible on Swift
@@ -192,6 +219,7 @@ static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
     _queue = dispatch_queue_create("blink.TermDevice", NULL);
     
     _outStream = [[ViewStream alloc] initWithQueue:_queue fd:_poutput[0]];
+    _outStream.device = self;
     _errStream = [[ViewStream alloc] initWithQueue:_queue fd:_perror[0]];
   }
   
@@ -265,11 +293,58 @@ static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
 {
   _delegate = NULL;
   _readlineListener = NULL;
-  
+
+  [self _cancelMoshNoticeCheckTimer];
+
   // Closing the Device streams. These are the main device, usually duped in Sessions.
   [_stream close];
   [_outStream close];
   [_errStream close];
+}
+
+#pragma mark - Mosh disconnect notice auto-close
+
+// Called on `_queue`, from ViewStream, for every chunk of decoded terminal
+// output. Watches for mosh's own "connection lost" bar text and, once seen,
+// closes the tab `kMoshAutoCloseGracePeriod` later, via the delegate (see
+// `deviceDidDetectStaleMoshConnection` in TermController.swift, which routes
+// through the same tab-close path a manual close uses) - since in practice a
+// mosh session that shows this bar never reconnects on its own.
+//
+// We fire a single one-shot timer from the FIRST sighting and don't require
+// the text to keep reappearing: mosh redraws the terminal with fine-grained
+// diffs, so once the bar is drawn, later redraws (e.g. the elapsed-seconds
+// count ticking up) may only retransmit the changed digits, not the literal
+// "mosh: Last contact" text - so waiting for repeated sightings can miss the
+// deadline entirely.
+- (void)_checkOutputForMoshDisconnectNotice:(NSString *)output {
+  if (_moshNoticeHandled ||
+      ([output rangeOfString:kMoshDisconnectNoticeContact].location == NSNotFound &&
+       [output rangeOfString:kMoshDisconnectNoticeReply].location == NSNotFound)) {
+    return;
+  }
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self->_moshNoticeCheckTimer || self->_moshNoticeHandled) {
+      return;
+    }
+    self->_moshNoticeCheckTimer = [NSTimer scheduledTimerWithTimeInterval:kMoshAutoCloseGracePeriod
+                                                                     target:self
+                                                                   selector:@selector(_moshNoticeGracePeriodElapsed)
+                                                                   userInfo:nil
+                                                                    repeats:NO];
+  });
+}
+
+- (void)_cancelMoshNoticeCheckTimer {
+  [_moshNoticeCheckTimer invalidate];
+  _moshNoticeCheckTimer = nil;
+}
+
+- (void)_moshNoticeGracePeriodElapsed {
+  _moshNoticeHandled = YES;
+  [self _cancelMoshNoticeCheckTimer];
+  [_delegate deviceDidDetectStaleMoshConnection];
 }
 
 - (void)attachView:(TermView *)termView

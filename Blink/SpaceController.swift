@@ -701,7 +701,18 @@ extension SpaceController: TermControlDelegate {
       _removeSpace(control)
     }
   }
-  
+
+  // Unlike `terminalHangup`, the session behind `control` is still alive here -
+  // it needs to actually be killed, not just have its already-dead tab cleaned up.
+  func terminalRequestsClose(control: TermController) {
+    if currentTerm() == control {
+      _closeCurrentSpace()
+    } else {
+      control.terminate()
+      _removeSpace(control)
+    }
+  }
+
   func terminalDidResize(control: TermController) {
     if currentTerm() == control {
       _displayHUD()

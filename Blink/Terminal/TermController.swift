@@ -36,6 +36,7 @@ import AVFoundation
 
 @objc protocol TermControlDelegate: NSObjectProtocol {
   func terminalHangup(control: TermController)
+  func terminalRequestsClose(control: TermController)
   @objc optional func terminalDidResize(control: TermController)
 }
 
@@ -394,6 +395,19 @@ extension TermController: TermDeviceDelegate {
         center.add(req, withCompletionHandler: nil)
       }
     }
+  }
+
+  /**
+   Mosh's own reconnect bar stayed up too long. In practice a mosh session that
+   reaches this state never reconnects on its own. Ask the delegate (SpaceController)
+   to close this tab through the same path a manual tab-close uses - closing the tab
+   outright, rather than trying to kill just the mosh session and leave the tab
+   showing a `blink>` prompt again: confirmed by hand that after mosh exits this way,
+   nothing re-attaches an interactive session to the tab, leaving it in a dead,
+   input-echoes-nowhere state. Closing the tab is also literally what was asked for.
+   */
+  func deviceDidDetectStaleMoshConnection() {
+    self.delegate?.terminalRequestsClose(control: self)
   }
 
   func apiCall(_ api: String!, andRequest request: String!) {

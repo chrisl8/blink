@@ -61,6 +61,7 @@
 - (void)viewNotify:(NSDictionary *)data;
 - (void)viewDidReceiveBellRing;
 - (UIViewController *)viewController;
+- (void)deviceDidDetectStaleMoshConnection;
 
 @end
 
