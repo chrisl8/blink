@@ -30,6 +30,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #import "TermDevice.h"
+#import <string.h>
 
 // Mosh's own "connection lost" bar (drawn by mosh's NotificationEngine, see
 // terminaloverlay.cc in mobile-shell/mosh) writes one of these two literal
@@ -40,8 +41,8 @@
 // "the reconnect bar is showing" - the mosh bridge only exposes a
 // state_callback used for suspend/resume - so we detect it by matching the
 // text that mosh itself writes to the pty stream.
-static NSString * const kMoshDisconnectNoticeContact = @"mosh: Last contact";
-static NSString * const kMoshDisconnectNoticeReply = @"mosh: Last reply";
+static const char * const kMoshDisconnectNoticeContact = "mosh: Last contact";
+static const char * const kMoshDisconnectNoticeReply = "mosh: Last reply";
 // How long to let the bar stay up (from when it first appears) before we
 // give up on it ever reconnecting and close the tab ourselves.
 static const NSTimeInterval kMoshAutoCloseGracePeriod = 10.0;
@@ -79,7 +80,7 @@ static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
 @class TermDevice;
 
 @interface TermDevice (MoshDisconnectDetection)
-- (void)_checkOutputForMoshDisconnectNotice:(NSString *)output;
+- (void)_checkOutputBytesForMoshDisconnectNotice:(const void *)buffer length:(size_t)len;
 @end
 
 @interface ViewStream: NSObject
@@ -121,40 +122,43 @@ static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
     const void * buffer;
     size_t len;
     data = dispatch_data_create_map(data, &buffer, &len);
-    
+
+    // Scan the raw bytes regardless of how the chunk ends up decoded below -
+    // the marker text is plain ASCII, so this works even when the chunk also
+    // contains invalid/split UTF-8 elsewhere and falls back to base64.
+    [_device _checkOutputBytesForMoshDisconnectNotice:buffer length:len];
+
     NSString *output = [[NSString alloc] initWithBytes:buffer length:len encoding:NSUTF8StringEncoding];
-    
+
     // Best case. We got good utf8 seq.
     if (output) {
-      [_device _checkOutputForMoshDisconnectNotice:output];
       [_view write:output];
       return;
     }
-    
+
     // May be we have incomplete utf8 seq at the end;
     int incompleteSize = __sizeOfIncompleteSequenceAtTheEnd(buffer, len);
-    
+
     if (incompleteSize == 0) {
       // No, we didn't find any incomplete seq at the end.
       // We have wrong seq in the middle. Pass base64 data. JS will heal it.
       [_view writeB64:[NSData dataWithBytes:buffer length:len]];
       return;
     }
-    
+
     // Save splitted sequences
     _splitChar = dispatch_data_create_subrange(data, len - incompleteSize, incompleteSize);
-    
+
     // We stripped incomplete seq.
     // Let's try to create string again with range
-    
+
     output = [[NSString alloc] initWithBytes:buffer length:len - incompleteSize encoding:NSUTF8StringEncoding];
     if (output) {
       // Good seq. Write it as string.
-      [_device _checkOutputForMoshDisconnectNotice:output];
       [_view write:output];
       return;
     }
-    
+
     // Nope, fallback to base64
     [_view writeB64:[NSData dataWithBytes:buffer length:len - incompleteSize]];
   };
@@ -304,12 +308,19 @@ static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
 
 #pragma mark - Mosh disconnect notice auto-close
 
-// Called on `_queue`, from ViewStream, for every chunk of decoded terminal
-// output. Watches for mosh's own "connection lost" bar text and, once seen,
-// closes the tab `kMoshAutoCloseGracePeriod` later, via the delegate (see
+// Called on `_queue`, from ViewStream, for every raw chunk of terminal
+// output, BEFORE any UTF-8 decoding is attempted. Watches for mosh's own
+// "connection lost" bar text and, once seen, closes the tab
+// `kMoshAutoCloseGracePeriod` later, via the delegate (see
 // `deviceDidDetectStaleMoshConnection` in TermController.swift, which routes
 // through the same tab-close path a manual close uses) - since in practice a
 // mosh session that shows this bar never reconnects on its own.
+//
+// We scan the raw bytes (rather than the decoded NSString) because the
+// marker text is plain ASCII and a chunk containing it can still fail to
+// decode as UTF-8 as a whole - e.g. it's cut mid-sequence, or contains
+// unrelated invalid bytes elsewhere - in which case the caller falls back to
+// base64 and no decoded string is ever produced.
 //
 // We fire a single one-shot timer from the FIRST sighting and don't require
 // the text to keep reappearing: mosh redraws the terminal with fine-grained
@@ -317,10 +328,13 @@ static int __sizeOfIncompleteSequenceAtTheEnd(const char *buffer, size_t len) {
 // count ticking up) may only retransmit the changed digits, not the literal
 // "mosh: Last contact" text - so waiting for repeated sightings can miss the
 // deadline entirely.
-- (void)_checkOutputForMoshDisconnectNotice:(NSString *)output {
-  if (_moshNoticeHandled ||
-      ([output rangeOfString:kMoshDisconnectNoticeContact].location == NSNotFound &&
-       [output rangeOfString:kMoshDisconnectNoticeReply].location == NSNotFound)) {
+- (void)_checkOutputBytesForMoshDisconnectNotice:(const void *)buffer length:(size_t)len {
+  if (_moshNoticeHandled) {
+    return;
+  }
+
+  if (!memmem(buffer, len, kMoshDisconnectNoticeContact, strlen(kMoshDisconnectNoticeContact)) &&
+      !memmem(buffer, len, kMoshDisconnectNoticeReply, strlen(kMoshDisconnectNoticeReply))) {
     return;
   }
 
